@@ -62,6 +62,9 @@ orders, containers) and nothing else.
 
 ## Changelog
 
+- v1.5 (6 Nov 2026) – clearing the Find box (backspace or its ×) clears the
+  results straight away; before, the last search stayed on screen until Find
+  was pressed again.
 - v1.4 (6 Nov 2026) – Special makes tile on Late & at risk: orders with a
   made-in-house line whose code is not stock held in Sage (or that the planner
   lists as a special make), with how many are still in production. SM pill on
