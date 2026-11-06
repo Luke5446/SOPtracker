@@ -56,7 +56,7 @@ main{max-width:1320px;margin:0 auto;padding:16px 16px 60px}
 .tile span{font-size:11.5px;color:var(--mut)}
 .tile:hover{border-color:var(--steel)}
 .tile.on{border-color:var(--gold);border-width:2px;background:#fdf9ef}
-.tile.red b{color:var(--red)} .tile.amber b{color:var(--amber)} .tile.green b{color:var(--green)} .tile.steel b{color:var(--steel)}
+.tile.red b{color:var(--red)} .tile.amber b{color:var(--amber)} .tile.green b{color:var(--green)} .tile.steel b{color:var(--steel)} .tile.gold b{color:#9a6f12}
 
 .card{background:var(--card);border:1px solid var(--line);border-radius:10px;margin-top:14px;box-shadow:0 1px 3px rgba(20,30,50,.06);overflow:hidden}
 .card h2{font-size:14px;padding:11px 16px;border-bottom:1px solid var(--line);color:var(--navy);display:flex;align-items:center;gap:10px;flex-wrap:wrap}
@@ -262,7 +262,7 @@ textarea{width:100%;min-height:150px;font-size:11px;font-family:Consolas,monospa
    "Contested": a line only has stock because it is older than another order
    that will go short on the same code.
    ═══════════════════════════════════════════════════════════════════════ */
-const APP_VER='1.3';
+const APP_VER='1.4';
 const LS_RAW='ordertracker_raw', LS_TS='ordertracker_ts', LS_SET='ordertracker_settings';
 const DEF_SET={
   made:['Tibard','Oliver Harvey','Clockwork','Clockwork Clothing','Clockwork Giant Clothing'],
@@ -372,6 +372,8 @@ function build(){
   const stkIdx=new Map();DATA.stk.forEach(s=>stkIdx.set(s.co+'|'+s.code,s));
   const stkFor=(co,code)=>stkIdx.get(co+'|'+code)||null;
   const anyStk=code=>stkFor('TIBARD',code)||stkFor('OLIVER HARVEY',code)||stkFor('TIBARD','BULK'+code)||stkFor('OLIVER HARVEY','BULK'+code);
+  // stock held in either company (Sage analysis code 3, OH website items, or a BULK record) – the planner's special-makes rule
+  const heldAny=base=>{const a=stkFor('TIBARD',base),b=stkFor('OLIVER HARVEY',base);return !!((a&&a.stockHeld)||(b&&(b.stockHeld||b.web))||stkFor('TIBARD','BULK'+base)||stkFor('OLIVER HARVEY','BULK'+base))};
   // made-in-house test per base code
   const madeCache=new Map();
   const isMade=base=>{
@@ -393,6 +395,7 @@ function build(){
       promised:l.date,hold:l.hold,ic:l.ic,link:soNo(l.link),stk:s,charge:isCharge(s),made:false,sources:[],expected:null,status:'',contested:false,contestNote:''};
     ln.made=!ln.charge&&isMade(base);
     ln.freetext=/^FREETEXT/.test(l.code);
+    ln.special=ln.made&&!ln.freetext&&!heldAny(base);   // made in house and not a stock-held code = special make
     o.lines.push(ln);LINES.push(ln);
   });
   ORDERS.forEach(o=>o.lines.sort((a,b)=>a.seq-b.seq));
@@ -437,8 +440,8 @@ function build(){
       if(need<=0)return;
       // a special make raised for this very line
       const sm=smWO.get(ln.pkey);
-      if(sm){const q=Math.min(need,sm.items.reduce((x,i)=>x+i.qty,0)||need);need-=q;src.push({t:'wo',qty:q,ref:sm.ref,due:sm.due,sm:true,printed:sm.printed})}
-      if(need>0&&!sm&&PP.smPending.has(ln.pkey)){src.push({t:'smpend',qty:need,seen:(PP.smPending.get(ln.pkey)||{}).seenAt||''});need=0}
+      if(sm){ln.special=true;const q=Math.min(need,sm.items.reduce((x,i)=>x+i.qty,0)||need);need-=q;src.push({t:'wo',qty:q,ref:sm.ref,due:sm.due,sm:true,printed:sm.printed})}
+      if(need>0&&!sm&&PP.smPending.has(ln.pkey)){ln.special=true;src.push({t:'smpend',qty:need,seen:(PP.smPending.get(ln.pkey)||{}).seenAt||''});need=0}
       // stock, oldest promised first
       if(need>0&&stock>0){const q=Math.min(stock,need);stock-=q;need-=q;src.push({t:'stock',qty:q});stockTakers.push(ln)}
       // the back-to-back PO Sage generated from this order
@@ -506,6 +509,8 @@ function build(){
     o.promD=pd(o.promised);o.days=o.promD?dayDiff(o.promD,t):null;
     const waiting=live.filter(l=>l.waiting);
     o.waiting=waiting;
+    o.special=live.filter(l=>l.special).length;              // special-make (non-stock) lines still to go
+    o.specialWait=live.filter(l=>l.special&&l.waiting).length; // of those, still in production / not yet raised
     let exp=t,unk=false;live.forEach(l=>{if(l.unknown)unk=true;else if(l.expected&&l.expected>exp)exp=l.expected});
     o.expected=unk?null:exp;o.unknown=unk;
     o.contested=live.some(l=>l.contested);
@@ -689,7 +694,7 @@ function orderCard(o){
   }
   const prog=o.ordQty?Math.round(o.despQty/o.ordQty*100):0;
   let h=`<div class="card">
-    <h2>${coTag(o.co)} <span style="font-size:18px">SO ${esc(o.doc)}</span> ${pill(o.status)}${o.hold?' <span class="pill p-grey">On hold</span>':''}${o.group?' '+groupPill(o.group):''}<span class="r">${o.user?'raised by '+esc(o.user)+' · ':''}${prog}% despatched</span></h2>
+    <h2>${coTag(o.co)} <span style="font-size:18px">SO ${esc(o.doc)}</span> ${pill(o.status)}${o.hold?' <span class="pill p-grey">On hold</span>':''}${o.group?' '+groupPill(o.group):''}${o.special?' <span class="pill p-gold">Special make</span>':''}<span class="r">${o.user?'raised by '+esc(o.user)+' · ':''}${prog}% despatched</span></h2>
     <div class="ord-head">
       <div><div class="lab">Customer</div><div class="val">${esc(custName(o))}<span class="sm">${esc(o.acct)}${custName(o)!==o.acctName?' · '+esc(o.acctName):''}</span></div></div>
       <div><div class="lab">Their order ref</div><div class="val">${esc(o.ref)||'–'}</div></div>
@@ -702,7 +707,7 @@ function orderCard(o){
     <div class="tw"><table><thead><tr><th>#</th><th>Code</th><th class="num">Ordered</th><th class="num">Sent</th><th class="num">To go</th><th>Where it is</th><th>Expected</th><th>Status</th></tr></thead><tbody>`;
   o.lines.forEach(ln=>{
     const open=UI.openLine[ln.key];
-    h+=`<tr class="row" onclick="toggleLine('${esc(ln.key)}')"><td class="num">${ln.seq||''}</td><td><span class="code">${esc(ln.code)}</span><div class="desc">${esc(ln.desc)}</div></td><td class="num">${fmt(ln.q1)}</td><td class="num">${fmt(ln.q2)}</td><td class="num"><b>${fmt(ln.out)}</b></td><td>${lineWhere(ln)}</td><td>${expCell(ln)}</td><td>${pill(ln.status)}</td></tr>`;
+    h+=`<tr class="row" onclick="toggleLine('${esc(ln.key)}')"><td class="num">${ln.seq||''}</td><td><span class="code">${esc(ln.code)}</span>${ln.special?' <span class="pill p-gold" title="Made in house, not a stock-held code">SM</span>':''}<div class="desc">${esc(ln.desc)}</div></td><td class="num">${fmt(ln.q1)}</td><td class="num">${fmt(ln.q2)}</td><td class="num"><b>${fmt(ln.out)}</b></td><td>${lineWhere(ln)}</td><td>${expCell(ln)}</td><td>${pill(ln.status)}</td></tr>`;
     if(open)h+=`<tr class="det"><td colspan="8">${lineDetail(ln)}</td></tr>`;
   });
   h+=`</tbody></table></div><div class="note">Click a line to see every live order that wants the same code, in the order the stock goes out. Dates: works order due date; container landing day + 1 working day; PO requested date. “Not on order” means no stock, works order, container or PO covers it.</div></div>`;
@@ -740,7 +745,7 @@ function orderTable(list,tab){
   if(!list.length)return '<div class="empty">Nothing here.</div>';
   let h=`<div class="tw"><table><thead><tr>${th(tab,'status','Status')}${th(tab,'so','Order')}${th(tab,'cust','Customer')}${th(tab,'added','Ordered')}${th(tab,'prom','Promised')}${th(tab,'days','Days')}${th(tab,'out','To go','num')}<th>Waiting on</th>${th(tab,'exp','Expected')}${th(tab,'group','Type')}</tr></thead><tbody>`;
   list.forEach(o=>{
-    h+=`<tr class="row" onclick="openOrder('${esc(o.key)}')"><td>${pill(o.status)}${o.contested?' <span class="pill p-amber" title="Stock contested on at least one line">&#9888;</span>':''}${o.hold?' <span class="pill p-grey">Hold</span>':''}</td><td>${coTag(o.co)} <span class="code">${esc(o.doc)}</span></td><td>${esc(custName(o))}<div class="desc">${custName(o)===o.ref.trim().replace(/^(EMB|DTF):\s*/i,'')?esc(o.acctName):esc(o.ref)}</div></td><td>${fd(pd(o.added))}</td><td>${fd(o.promD)}</td><td>${daysCell(o)}</td><td class="num">${fmt(o.outQty)}<div class="sm">${o.outLines} line${o.outLines===1?'':'s'}</div></td><td class="sm" style="color:var(--txt)">${o.waiting.length?waitSummary(o):'<span class="sm">in stock</span>'}</td><td>${orderExp(o)}</td><td>${groupPill(o.group)}</td></tr>`;
+    h+=`<tr class="row" onclick="openOrder('${esc(o.key)}')"><td>${pill(o.status)}${o.contested?' <span class="pill p-amber" title="Stock contested on at least one line">&#9888;</span>':''}${o.hold?' <span class="pill p-grey">Hold</span>':''}${o.special?' <span class="pill p-gold" title="Special make: '+o.special+' non-stock line'+(o.special>1?'s':'')+'">SM</span>':''}</td><td>${coTag(o.co)} <span class="code">${esc(o.doc)}</span></td><td>${esc(custName(o))}<div class="desc">${custName(o)===o.ref.trim().replace(/^(EMB|DTF):\s*/i,'')?esc(o.acctName):esc(o.ref)}</div></td><td>${fd(pd(o.added))}</td><td>${fd(o.promD)}</td><td>${daysCell(o)}</td><td class="num">${fmt(o.outQty)}<div class="sm">${o.outLines} line${o.outLines===1?'':'s'}</div></td><td class="sm" style="color:var(--txt)">${o.waiting.length?waitSummary(o):'<span class="sm">in stock</span>'}</td><td>${orderExp(o)}</td><td>${groupPill(o.group)}</td></tr>`;
   });
   return h+'</tbody></table></div>';
 }
@@ -750,24 +755,25 @@ function renderRisk(v){
   const all=riskOrders();
   const late=all.filter(o=>o.status==='late'),risk=all.filter(o=>o.status==='risk');
   const contested=liveOrders().filter(o=>o.contested);
-  const tiles=[['late','red',late.length,'late (promised date passed)'],['risk','amber',risk.length,'at risk'],['contested','amber',contested.length,'stock contested'],['soon','steel',liveOrders().filter(o=>o.days!=null&&o.days>=0&&o.days<=SET.soon).length,`due within ${SET.soon} days`]];
+  const special=liveOrders().filter(o=>o.special>0);
+  const tiles=[['late','red',late.length,'late (promised date passed)'],['risk','amber',risk.length,'at risk'],['contested','amber',contested.length,'stock contested'],['soon','steel',liveOrders().filter(o=>o.days!=null&&o.days>=0&&o.days<=SET.soon).length,`due within ${SET.soon} days`],['special','gold',special.length,`special makes (${special.filter(o=>o.specialWait>0).length} still in production)`]];
   let h=`<div class="tiles">${tiles.map(t=>`<div class="tile ${t[1]} ${UI.tile===t[0]?'on':''}" onclick="setTile('${t[0]}')"><b>${t[2]}</b><span>${t[3]}</span></div>`).join('')}</div>`;
   let list=all;
-  if(UI.tile==='late')list=late;else if(UI.tile==='risk')list=risk;else if(UI.tile==='contested')list=contested;else if(UI.tile==='soon')list=liveOrders().filter(o=>o.days!=null&&o.days>=0&&o.days<=SET.soon);
+  if(UI.tile==='late')list=late;else if(UI.tile==='risk')list=risk;else if(UI.tile==='contested')list=contested;else if(UI.tile==='soon')list=liveOrders().filter(o=>o.days!=null&&o.days>=0&&o.days<=SET.soon);else if(UI.tile==='special')list=special;
   const groups=[['bought','Bought in','Waiting on a supplier PO'],['made','Made in house','Waiting on a works order or a Clockwork container – including codes usually bought from Clockwork that have a works order on'],['both','Waiting on both','Some lines on production, some on a supplier']];
   const none=list.filter(o=>!o.group);
   groups.forEach(g=>{
     const rows=sortBy(list.filter(o=>o.group===g[0]),'risk-'+g[0],{k:'days',d:'a'});
     h+=`<div class="sec"><h3>${g[1]} <span class="n">${rows.length}</span><span class="r">${g[2]} · <a href="javascript:void(0)" onclick="exportCsv('${g[0]}')">Export CSV</a></span></h3><div class="card" style="margin-top:8px">${orderTable(rows,'risk-'+g[0])}</div></div>`;
   });
-  if(none.length)h+=`<div class="sec"><h3>Nothing waiting – date only <span class="n">${none.length}</span><span class="r">everything outstanding is in stock; the promised date has passed or is contested</span></h3><div class="card" style="margin-top:8px">${orderTable(sortBy(none,'risk-none',{k:'days',d:'a'}),'risk-none')}</div></div>`;
-  h+=`<div class="legend"><span><b>Late</b> = promised date (Sage order header) has passed with quantity still to go.</span><span><b>At risk</b> = a line's cover arrives after the promised date, or on an unknown date, or nothing is on order for it.</span><span><b>Contested</b> = the line has stock only because it is older than another live order that will go short.</span><span><b>Overdue</b> = a works order or PO date has passed and it is still not in.</span><span>Intercompany orders (OLIVER / TIB003) are not listed.</span></div>`;
+  if(none.length)h+=`<div class="sec"><h3>${UI.tile==='special'?'Made and booked in':'Nothing waiting – date only'} <span class="n">${none.length}</span><span class="r">${UI.tile==='special'?'the special make is in stock; the order can be picked':'everything outstanding is in stock; the promised date has passed or is contested'}</span></h3><div class="card" style="margin-top:8px">${orderTable(sortBy(none,'risk-none',{k:'days',d:'a'}),'risk-none')}</div></div>`;
+  h+=`<div class="legend"><span><b>Late</b> = promised date (Sage order header) has passed with quantity still to go.</span><span><b>At risk</b> = a line's cover arrives after the promised date, or on an unknown date, or nothing is on order for it.</span><span><b>Contested</b> = the line has stock only because it is older than another live order that will go short.</span><span><b>Overdue</b> = a works order or PO date has passed and it is still not in.</span><span><b>Special make</b> = a made-in-house line whose code is not stock held in Sage (or one the planner lists as a special make).</span><span>Intercompany orders (OLIVER / TIB003) are not listed.</span></div>`;
   v.innerHTML=h;
 }
 function setTile(t){UI.tile=UI.tile===t?'':t;render()}
 function exportCsv(g){
   const all=riskOrders();
-  let list=all;if(UI.tile==='late')list=all.filter(o=>o.status==='late');else if(UI.tile==='risk')list=all.filter(o=>o.status==='risk');else if(UI.tile==='contested')list=liveOrders().filter(o=>o.contested);
+  let list=all;if(UI.tile==='late')list=all.filter(o=>o.status==='late');else if(UI.tile==='risk')list=all.filter(o=>o.status==='risk');else if(UI.tile==='contested')list=liveOrders().filter(o=>o.contested);else if(UI.tile==='soon')list=liveOrders().filter(o=>o.days!=null&&o.days>=0&&o.days<=SET.soon);else if(UI.tile==='special')list=liveOrders().filter(o=>o.special>0);
   const rows=sortBy(list.filter(o=>o.group===g),'risk-'+g,{k:'days',d:'a'});
   const cell=s=>'"'+String(s==null?'':s).replace(/"/g,'""')+'"';
   const lines=[['Status','Company','SO','Customer','Account','Their ref','Ordered','Promised','Days','Lines to go','Qty to go','Waiting on','Expected','Type'].map(cell).join(',')];

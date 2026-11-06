@@ -62,6 +62,10 @@ orders, containers) and nothing else.
 
 ## Changelog
 
+- v1.4 (6 Nov 2026) – Special makes tile on Late & at risk: orders with a
+  made-in-house line whose code is not stock held in Sage (or that the planner
+  lists as a special make), with how many are still in production. SM pill on
+  the order and the line. Orders needing embroidery: planned for later.
 - v1.3 (6 Nov 2026) – the Find an order tab opens blank: just the search box
   until you type an order number, customer, order ref or code. The late /
   at-risk counts are on the Late & at risk tab.
