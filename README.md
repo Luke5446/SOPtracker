@@ -62,6 +62,9 @@ orders, containers) and nothing else.
 
 ## Changelog
 
+- v1.3 (6 Nov 2026) – the Find an order tab opens blank: just the search box
+  until you type an order number, customer, order ref or code. The late /
+  at-risk counts are on the Late & at risk tab.
 - v1.2 (6 Nov 2026) – whole-column pastes from Excel bring 150,000+ empty
   rows with them, more than the browser will store, so Publish found nothing
   saved ("Paste today's data first"). Blank rows and the header are now
