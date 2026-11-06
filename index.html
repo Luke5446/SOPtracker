@@ -1,0 +1,928 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Order tracker – where is my sales order?</title>
+<style>
+:root{
+  --navy:#1F3864; --navy2:#2a4a80; --steel:#5b7ba6; --gold:#C9A24B;
+  --bg:#f4f6f9; --card:#ffffff; --line:#dfe4ec; --txt:#1c2431; --mut:#6b7686;
+  --red:#c0392b; --green:#1e7e46; --amber:#b7791f;
+  --red-bg:#fde8e8; --amber-bg:#fef3c7; --green-bg:#d1fae5; --blue-bg:#dbeafe; --grey-bg:#eceff4;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Segoe UI',Arial,sans-serif;background:var(--bg);color:var(--txt);min-height:100vh;font-size:14px}
+header{background:var(--navy);color:#fff;padding:12px 22px;display:flex;align-items:center;gap:14px;flex-wrap:wrap}
+header img{height:38px;background:#fff;border-radius:6px;padding:3px 9px}
+header h1{font-size:19px;font-weight:600;letter-spacing:.3px}
+header h1 span{color:var(--gold)}
+header .sub{font-size:12px;opacity:.75}
+header .spacer{flex:1}
+header .status{font-size:11.5px;opacity:.85;text-align:right;line-height:1.35}
+header .status b{color:var(--gold);font-weight:600}
+.btn{border:none;border-radius:6px;padding:8px 14px;font-size:13px;cursor:pointer;font-weight:600;font-family:inherit}
+.btn-gold{background:var(--gold);color:#22262e}
+.btn-ghost{background:transparent;color:#fff;border:1px solid rgba(255,255,255,.35)}
+.btn-ghost:hover{border-color:#fff}
+.btn-navy{background:var(--navy);color:#fff}
+.btn-line{background:#fff;color:var(--navy);border:1px solid var(--line)}
+.btn-sm{padding:5px 10px;font-size:12px}
+.btn-green{background:#16a34a;color:#fff}
+.mode{font-size:10px;font-weight:700;padding:2px 8px;border-radius:10px;color:#fff;background:#1e40af;letter-spacing:.3px}
+body.viewer-mode .edit-only{display:none !important}
+.viewer-banner{display:none;background:#dbeafe;border-bottom:1px solid #93c5fd;padding:8px 20px;font-size:12px;color:#1e40af;text-align:center}
+body.viewer-mode .viewer-banner{display:block}
+.btn:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible{outline:2px solid var(--gold);outline-offset:1px}
+nav.tabs{display:flex;gap:2px;background:var(--navy2);padding:0 14px;flex-wrap:wrap}
+nav.tabs button{background:none;border:0;color:#cfd8e8;padding:11px 15px;font-size:13.5px;cursor:pointer;border-bottom:3px solid transparent;font-family:inherit}
+nav.tabs button:hover{color:#fff}
+nav.tabs button.on{color:#fff;border-bottom-color:var(--gold);font-weight:600}
+nav.tabs button .n{display:inline-block;margin-left:6px;background:rgba(255,255,255,.15);border-radius:10px;padding:0 7px;font-size:11px;font-weight:600}
+nav.tabs button.on .n{background:var(--gold);color:#22262e}
+main{max-width:1320px;margin:0 auto;padding:16px 16px 60px}
+
+.filters{display:flex;align-items:center;gap:8px;margin:0 0 12px;flex-wrap:wrap}
+.filters input,.filters select{font-size:13px;padding:7px 10px;border-radius:6px;border:1px solid var(--line);background:#fff;color:var(--txt);font-family:inherit}
+.filters input[type=search]{min-width:240px;flex:1 1 240px}
+.filters .rc{font-size:12px;color:var(--mut);margin-left:auto}
+.seg{display:inline-flex;border:1px solid var(--line);border-radius:6px;overflow:hidden;background:#fff}
+.seg button{border:0;background:none;padding:7px 12px;font-size:13px;cursor:pointer;color:var(--mut);font-family:inherit}
+.seg button.on{background:var(--navy);color:#fff}
+
+.tiles{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px}
+.tile{background:var(--card);border:1px solid var(--line);border-radius:9px;padding:10px 14px;min-width:120px;cursor:pointer;flex:1 1 120px;max-width:220px}
+.tile b{display:block;font-size:24px;font-weight:700;color:var(--navy);line-height:1.1}
+.tile span{font-size:11.5px;color:var(--mut)}
+.tile:hover{border-color:var(--steel)}
+.tile.on{border-color:var(--gold);border-width:2px;background:#fdf9ef}
+.tile.red b{color:var(--red)} .tile.amber b{color:var(--amber)} .tile.green b{color:var(--green)} .tile.steel b{color:var(--steel)}
+
+.card{background:var(--card);border:1px solid var(--line);border-radius:10px;margin-top:14px;box-shadow:0 1px 3px rgba(20,30,50,.06);overflow:hidden}
+.card h2{font-size:14px;padding:11px 16px;border-bottom:1px solid var(--line);color:var(--navy);display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.card h2 .r{margin-left:auto;font-size:12px;font-weight:400;color:var(--mut)}
+.card .note{padding:10px 16px;font-size:12.5px;color:var(--mut);border-bottom:1px solid var(--line);background:#fafbfd;line-height:1.45}
+.tw{overflow-x:auto}
+table{width:100%;border-collapse:collapse;font-size:13px}
+th{background:#f7f9fc;text-align:left;padding:8px 10px;font-size:11.5px;color:var(--mut);border-bottom:1px solid var(--line);white-space:nowrap;font-weight:600;user-select:none}
+th.sortable{cursor:pointer}
+th.s::after{content:' ▲';font-size:9px;color:var(--steel)} th.sd::after{content:' ▼';font-size:9px;color:var(--steel)}
+td{padding:8px 10px;border-bottom:1px solid #eef1f6;vertical-align:top}
+tbody tr.row{cursor:pointer}
+tbody tr.row:hover{background:#f2f6fc}
+td.num,th.num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+.code{font-family:Consolas,monospace;font-weight:700;color:var(--navy);font-size:12.5px;white-space:nowrap}
+td .desc{font-size:12px;color:var(--mut);margin-top:2px;max-width:360px}
+td .sm,.sm{font-size:11.5px;color:var(--mut)}
+.pill{display:inline-block;font-size:11px;font-weight:600;padding:2px 8px;border-radius:12px;white-space:nowrap}
+.p-red{background:var(--red-bg);color:#b91c1c} .p-amber{background:var(--amber-bg);color:#92400e}
+.p-green{background:var(--green-bg);color:#065f46} .p-blue{background:var(--blue-bg);color:#1e40af}
+.p-grey{background:var(--grey-bg);color:#4b5563} .p-gold{background:#f6ecd2;color:#7a5a12}
+.co{display:inline-block;font-size:10.5px;font-weight:700;padding:1px 6px;border-radius:4px;letter-spacing:.3px}
+.co-t{background:#e4eaf6;color:var(--navy)} .co-o{background:#f3ead6;color:#7a5a12}
+.empty{padding:34px 16px;text-align:center;color:var(--mut);font-size:13.5px}
+.empty b{display:block;color:var(--navy);font-size:15px;margin-bottom:6px}
+.legend{font-size:12px;color:var(--mut);margin:10px 2px 0;display:flex;gap:14px;flex-wrap:wrap;line-height:1.4}
+
+/* search */
+.find{display:flex;gap:8px;align-items:center;margin:4px 0 14px;flex-wrap:wrap}
+.find input{flex:1 1 280px;font-size:17px;padding:11px 14px;border-radius:8px;border:2px solid var(--steel);font-family:inherit;color:var(--txt)}
+.find input:focus{border-color:var(--gold)}
+.find .btn{padding:11px 18px;font-size:14px}
+.hint{font-size:12px;color:var(--mut);margin:-6px 0 12px}
+
+/* order card */
+.ord-head{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px 18px;padding:12px 16px;border-bottom:1px solid var(--line);background:#fafbfd}
+.ord-head .lab{font-size:10.5px;color:var(--mut);text-transform:uppercase;letter-spacing:.4px;font-weight:600}
+.ord-head .val{font-size:14px;color:var(--txt);margin-top:2px;font-weight:600}
+.ord-head .val.big{font-size:20px;color:var(--navy)}
+.ord-head .val .sm{font-weight:400;display:block}
+.why{padding:12px 16px;border-bottom:1px solid var(--line);font-size:13px;line-height:1.5}
+.why.ok{background:#f0fdf4} .why.bad{background:#fff5f5} .why.warn{background:#fffbeb}
+.why b{color:var(--navy)}
+.src{display:inline-block;font-size:12px;padding:3px 9px;border-radius:7px;margin:2px 4px 2px 0;border:1px solid var(--line);background:#fff;white-space:nowrap;line-height:1.4}
+.src.stock{background:var(--green-bg);border-color:#a7f3d0;color:#065f46}
+.src.alloc{background:var(--green-bg);border-color:#a7f3d0;color:#065f46}
+.src.wo{background:#ede9fe;border-color:#c4b5fd;color:#4c1d95}
+.src.cont{background:var(--blue-bg);border-color:#93c5fd;color:#1e40af}
+.src.po{background:#fef3c7;border-color:#fcd34d;color:#78350f}
+.src.short{background:var(--red-bg);border-color:#fca5a5;color:#991b1b}
+.src.done{background:var(--grey-bg);border-color:#d1d5db;color:#4b5563}
+.src.via{background:#f3ead6;border-color:#e2c98e;color:#7a5a12}
+.src b{font-weight:700}
+.src .d{opacity:.8}
+.warnflag{display:inline-block;font-size:11px;font-weight:700;color:#92400e;background:var(--amber-bg);border-radius:6px;padding:2px 7px;margin-top:3px;cursor:help}
+tr.det td{background:#f8fafd;padding:10px 14px 14px 30px;cursor:default}
+.det h4{font-size:12px;color:var(--navy);margin:0 0 6px}
+.det table{font-size:12px} .det th{font-size:10.5px;padding:5px 8px} .det td{padding:5px 8px}
+.sec{margin-top:18px}
+.sec h3{font-size:15px;color:var(--navy);display:flex;align-items:center;gap:10px}
+.sec h3 .n{font-size:12px;font-weight:600;color:#fff;background:var(--steel);border-radius:10px;padding:1px 8px}
+.sec h3 .r{margin-left:auto;font-size:12px;color:var(--mut);font-weight:400}
+.days{font-weight:700} .days.late{color:var(--red)} .days.soon{color:var(--amber)}
+.summary-list{font-size:12px;color:var(--txt);line-height:1.45}
+.summary-list .k{color:var(--mut)}
+
+/* modal */
+.ov{position:fixed;inset:0;background:rgba(20,30,50,.45);display:none;align-items:flex-start;justify-content:center;padding:40px 16px;z-index:50;overflow:auto}
+.ov.show{display:flex}
+.md{background:#fff;border-radius:10px;width:100%;max-width:760px;box-shadow:0 12px 40px rgba(20,30,50,.3)}
+.md h3{font-size:16px;color:var(--navy);padding:14px 18px;border-bottom:1px solid var(--line);display:flex;align-items:center}
+.md h3 .x{margin-left:auto;background:none;border:0;font-size:20px;cursor:pointer;color:var(--mut)}
+.md .body{padding:16px 18px}
+.md p{font-size:13px;color:var(--mut);margin-bottom:10px;line-height:1.45}
+.md p b{color:var(--txt)}
+textarea{width:100%;min-height:150px;font-size:11px;font-family:Consolas,monospace;padding:8px;border:1px solid var(--line);border-radius:6px;background:#fafbfd;color:var(--txt);resize:vertical}
+.md .foot{padding:12px 18px;border-top:1px solid var(--line);display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.md .foot .msg{font-size:12.5px;color:var(--mut);margin-left:auto}
+.md .foot .msg.ok{color:var(--green)} .md .foot .msg.bad{color:var(--red)}
+.set{display:grid;grid-template-columns:200px 1fr;gap:12px 16px;align-items:start;font-size:13px}
+.set label{color:var(--navy);font-weight:600;padding-top:6px}
+.set input[type=text],.set input[type=number]{border:1px solid var(--line);border-radius:6px;padding:7px 10px;font-size:13px;width:100%;font-family:inherit}
+.set input[type=number]{width:90px}
+.set .h{font-size:12px;color:var(--mut);margin-top:4px}
+.set textarea{min-height:70px}
+@media (max-width:700px){
+  .set{grid-template-columns:1fr}.set label{padding-top:0}
+  header{padding:10px 14px;gap:10px} header .status{display:none} header h1{font-size:17px}
+  main{padding:12px 10px 50px}
+  .ord-head{grid-template-columns:1fr 1fr}
+  td,th{padding:7px 7px}
+}
+@media (prefers-reduced-motion:reduce){*{transition:none!important}}
+@media print{header .btn,nav.tabs,.filters,.find,.viewer-banner{display:none!important}}
+</style>
+</head>
+<body>
+
+<header>
+  <img src="data:image/jpeg;base64,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" alt="Tibard">
+  <div>
+    <h1>Order<span>tracker</span></h1>
+    <div class="sub">Sales office – where a live order is up to, what is missing and why</div>
+  </div>
+  <div class="spacer"></div>
+  <div class="status" id="hdrStatus">No data loaded</div>
+  <span id="modeBadge" class="mode"></span>
+  <button class="btn btn-gold edit-only" id="pasteBtn" onclick="openPaste()">Paste today's data</button>
+  <button class="btn btn-green edit-only" id="pubBtn" onclick="publishTeam()">&#128228; Publish for team</button>
+  <button class="btn btn-ghost edit-only" id="pubSetupBtn" onclick="pubSetup()" title="A GitHub token on this PC lets Publish put data.json straight into the repo">&#9881; Set up this PC</button>
+  <button class="btn btn-ghost edit-only" id="setBtn" onclick="openSettings()">Settings</button>
+</header>
+
+<nav class="tabs" id="tabs">
+  <button data-t="find" class="on">Find an order</button>
+  <button data-t="risk">Late &amp; at risk<span class="n" id="n-risk">0</span></button>
+  <button data-t="jump">Can jump the queue<span class="n" id="n-jump">0</span></button>
+  <button data-t="all">All live orders<span class="n" id="n-all">0</span></button>
+  <button data-t="data">Data</button>
+</nav>
+
+<div class="viewer-banner">&#128065; Read-only view of the latest data published by the sales manager. <span id="bannerDate" style="font-weight:700"></span></div>
+
+<main>
+  <div class="filters" id="filters">
+    <div class="seg" id="coSeg">
+      <button data-co="" class="on">Both companies</button>
+      <button data-co="TIBARD">Tibard</button>
+      <button data-co="OLIVER HARVEY">Oliver Harvey</button>
+    </div>
+    <input type="search" id="q" placeholder="Filter by customer, their order ref, code or SO number">
+    <span class="rc" id="rc"></span>
+  </div>
+  <div id="view"></div>
+</main>
+
+<!-- Paste modal -->
+<div class="ov" id="pasteOv">
+  <div class="md">
+    <h3>Paste today's data <button class="x" onclick="closeOv('pasteOv')" aria-label="Close">×</button></h3>
+    <div class="body">
+      <p>Refresh the <b>Order tracker</b> Excel query (<b>ordertracker_live.sql</b>), select <b>columns A to AD</b> for every row (the header row is fine either way), copy, and paste below. Loading replaces yesterday's data. Works orders come from the production planner and containers from the stock planner, read live each time the page opens.</p>
+      <textarea id="pasteTa" placeholder="Paste here…" spellcheck="false"></textarea>
+    </div>
+    <div class="foot">
+      <button class="btn btn-navy" onclick="loadPaste()">Load data</button>
+      <button class="btn btn-line" onclick="closeOv('pasteOv')">Cancel</button>
+      <span class="msg" id="pasteMsg"></span>
+    </div>
+  </div>
+</div>
+
+<!-- Settings modal -->
+<div class="ov" id="setOv">
+  <div class="md">
+    <h3>Settings <button class="x" onclick="closeOv('setOv')" aria-label="Close">×</button></h3>
+    <div class="body">
+      <div class="set">
+        <label>Made in house</label>
+        <div><textarea id="sMade"></textarea><div class="h">Manufacturer names, one per line, matched exactly after trimming (not case sensitive). A code is also made in house when it is on the production planner's buffer list, a live works order or the stock planner's container list. Anything else is bought in.</div></div>
+        <label>Ignore product groups</label>
+        <div><input type="text" id="sGroups"><div class="h">Comma separated. 54 is Additional Charges (logo and handling lines) – these never hold an order up.</div></div>
+        <label>Share stock across companies</label>
+        <div><label style="font-weight:400;color:var(--txt);display:flex;gap:8px;align-items:center;padding:0"><input type="checkbox" id="sShare" class="chk"> Made-in-house codes draw on Tibard, BULK and OH stock as one pool</label><div class="h">On by default, as the Buffer sheet counts it. Bought-in codes are always per company.</div></div>
+        <label>Held sales orders</label>
+        <div><label style="font-weight:400;color:var(--txt);display:flex;gap:8px;align-items:center;padding:0"><input type="checkbox" id="sHoldSO" class="chk"> Count on-hold sales orders as demand</label><div class="h">Off by default: held orders are shown but take no stock from live ones.</div></div>
+        <label>Due soon window</label>
+        <div><input type="number" id="sSoon" min="0" max="60"> days <div class="h">Orders promised within this many days get the amber day count.</div></div>
+      </div>
+    </div>
+    <div class="foot">
+      <button class="btn btn-navy" onclick="saveSettings()">Save settings</button>
+      <button class="btn btn-line" onclick="closeOv('setOv')">Cancel</button>
+      <button class="btn btn-line" onclick="clearSaved()" title="Forget the data pasted on this PC and reload what was last published for the team">Clear saved data</button>
+      <span class="msg" id="setMsg"></span>
+    </div>
+  </div>
+</div>
+
+<script>
+/* ═══════════════════════════════════════════════════════════════════════
+   Order tracker — data model  (v1.0, 6 Nov 2026)
+
+   One daily paste from ordertracker_live.sql (columns A–AD, the POtracker
+   layout): SO rows (every product line on a live or held sales order), PO
+   rows (live purchase order lines) and STK rows (stock + classification per
+   code per company). Works orders come from the production planner's
+   published data.json, containers from the stock planner's, both read when
+   the page opens.
+
+   Who gets what, per code:
+     1. Sage allocation on the line (Qty4) is already reserved for it.
+     2. Free stock covers the oldest promised date first (then order date,
+        SO number, line) — the same rule as the production planner.
+     3. A special-make works order raised for the line covers it.
+     4. The back-to-back PO Sage generated from the order (column Q).
+     5. Live works orders carrying the code, oldest raised first.
+     6. Containers on the stock planner, in landing order (+1 working day).
+     7. Live purchase orders for the code, earliest date first.
+     8. Anything left is "not on order".
+   A made-in-house code pools Tibard + BULK + OH stock (and both companies'
+   orders, intercompany mirrors left out); a bought-in code is per company.
+   "Contested": a line only has stock because it is older than another order
+   that will go short on the same code.
+   ═══════════════════════════════════════════════════════════════════════ */
+const APP_VER='1.0';
+const LS_RAW='ordertracker_raw', LS_TS='ordertracker_ts', LS_SET='ordertracker_settings';
+const DEF_SET={
+  made:['Tibard','Oliver Harvey','Clockwork','Clockwork Clothing','Clockwork Giant Clothing'],
+  groups:['54'], holdSO:false, share:true, soon:7
+};
+const CLOCKWORK_ACCTS=['CLO003'];
+let SET=loadSettings();
+let DATA={so:[],po:[],stk:[],ts:null};
+let ORDERS=[];                 // one per company + SO number
+let ORD_IDX=new Map();         // co|doc -> order
+let LINES=[];                  // every SO line
+let POOLS=new Map();           // pool key -> allocation detail
+let JUMPS=[];                  // orders that could be completed by borrowing stock held for a waiting order
+let UI={tab:'find',co:'',q:'',find:'',open:null,openLine:{},sort:{},tile:''};
+const IS_EDITOR=/[?&]edit\b/.test(window.location.search);
+
+function lsGet(k,d){try{const v=localStorage.getItem(k);return v?JSON.parse(v):d}catch(e){return d}}
+function lsSet(k,v){try{localStorage.setItem(k,JSON.stringify(v))}catch(e){}}
+function loadSettings(){const s=Object.assign({},DEF_SET,lsGet(LS_SET,{}));if(!Array.isArray(s.made))s.made=DEF_SET.made.slice();if(!Array.isArray(s.groups))s.groups=DEF_SET.groups.slice();return s}
+
+const num=v=>{const n=parseFloat(String(v==null?'':v).replace(/[,\s]/g,''));return isNaN(n)?0:n};
+const esc=s=>String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const today=()=>{const d=new Date();return new Date(d.getFullYear(),d.getMonth(),d.getDate())};
+const pd=s=>{if(!s)return null;const m=/^(\d{4})-(\d{2})-(\d{2})/.exec(s);if(m)return new Date(+m[1],+m[2]-1,+m[3]);const n=Number(s);if(n>30000&&n<80000)return new Date(1899,11,30+n);const d=new Date(s);return isNaN(d)?null:d};
+const iso=d=>d?d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'):'';
+const fd=d=>d?d.toLocaleDateString('en-GB',{day:'2-digit',month:'short'}):'–';
+const fdl=d=>d?d.toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'numeric'}):'–';
+const fdt=s=>s?new Date(s).toLocaleString('en-GB',{day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'}):'';
+const dayDiff=(a,b)=>Math.round((a-b)/86400000);
+const addDays=(d,n)=>{const x=new Date(d);x.setDate(x.getDate()+n);return x};
+const maxDate=(a,b)=>!a?b:!b?a:(a>b?a:b);
+const coTag=c=>c==='TIBARD'?'<span class="co co-t">TIB</span>':'<span class="co co-o">OH</span>';
+const coShort=c=>c==='TIBARD'?'Tibard':'OH';
+const fmt=n=>Number.isInteger(n)?String(n):n.toFixed(2).replace(/\.?0+$/,'');
+const soNo=s=>String(s||'').replace(/^0+/,'');
+const baseCode=c=>c.replace(/^BULK/,'');
+// England & Wales bank holidays, so "one working day after" skips them
+const BANK_HOLS=new Set(['2026-01-01','2026-04-03','2026-04-06','2026-05-04','2026-05-25','2026-08-31','2026-12-25','2026-12-28',
+  '2027-01-01','2027-03-26','2027-03-29','2027-05-03','2027-05-31','2027-08-30','2027-12-27','2027-12-28']);
+const isWorkDay=d=>d.getDay()!==0&&d.getDay()!==6&&!BANK_HOLS.has(iso(d));
+function nextWorkDay(d,n){let x=new Date(d);n=n||1;while(n>0){x=addDays(x,1);if(isWorkDay(x))n--}return x}
+
+/* ── parse the paste ───────────────────────────────────────────────────── */
+function parseRaw(txt){
+  const so=[],po=[],stk=[];let bad=0;
+  txt.replace(/\r/g,'').split('\n').forEach(line=>{
+    if(!line.trim())return;
+    const c=line.split('\t').map(x=>{x=x.trim();if(x.length>1&&x[0]==='"'&&x[x.length-1]==='"')x=x.slice(1,-1).replace(/""/g,'"');return x.trim()});
+    if(c[0]==='RowType')return;
+    if(!/^(SO|PO|STK)$/.test(c[0])||c.length<20){bad++;return}
+    const base={key:c[2],co:c[1],code:c[3].toUpperCase(),desc:c[4],doc:c[5],seq:num(c[6]),acct:c[7],acctName:c[8],ref:c[9],
+      date:c[10]||'',q1:num(c[11]),q2:num(c[12]),q3:num(c[13]),q4:c[14]===''?null:num(c[14]),fulfil:c[15],link:c[16]||'',b2bN:num(c[17]),
+      ic:c[18]==='Y',status:c[27]||'0',added:c[28]||'',user:c[29]||''};
+    if(c[0]==='SO') so.push(Object.assign(base,{out:base.q3,alloc:base.q4||0,hold:base.status==='1'}));
+    else if(c[0]==='PO') po.push(Object.assign(base,{out:base.q3,hold:base.status==='1'}));
+    else stk.push({key:c[2],co:c[1],code:c[3].toUpperCase(),name:c[4],supNo:c[7],supName:c[8],supCode:c[9],
+      inStock:num(c[11]),alloc:num(c[12]),free:num(c[13]),onPO:num(c[14]),fulfil:c[15],b2bHist:num(c[17]),
+      mfr:c[19],stockHeld:c[20]==='Yes',web:c[21]==='Yes',grp:c[22],bom:c[23],lead:c[24]===''?null:num(c[24]),leadUnit:c[25],moq:num(c[26]),missing:c[4]==='CODE NOT IN STOCK FILE'});
+  });
+  return {so,po,stk,bad};
+}
+
+/* ── the other apps' published data ────────────────────────────────────── */
+const PP_URL='https://luke5446.github.io/Tibard-Productionplan/data.json';
+const SP_URL='https://luke5446.github.io/Tibard-Stock-Planner/data.json';
+let PP={ok:false,err:'',wos:[],codes:new Set(),smPending:new Map(),savedAt:'',sopAt:'',rows:new Map()};
+let SP={ok:false,err:'',cPOs:[],codes:new Set(),nextContDate:'',savedAt:''};
+function fetchPP(){
+  fetch(PP_URL+'?t='+Date.now()).then(r=>{if(!r.ok)throw new Error('HTTP '+r.status);return r.json()}).then(s=>{
+    const codes=new Set(),rows=new Map();
+    (s.rows||[]).forEach(r=>{const c=String(r.code||'').toUpperCase();if(c){codes.add(c);rows.set(c,r)}});
+    const wos=(s.WOs||[]).map((w,i)=>({ref:w.ref||'',due:w.due||'',start:w.start||'',createdAt:w.createdAt||'',i,sm:w.sm||null,embOnly:!!w.embOnly,printed:!!w.printed,
+      items:(w.items||[]).map(it=>({code:String(it.code||'').toUpperCase(),qty:num(it.qty)})).filter(it=>it.code&&it.qty>0)}));
+    wos.forEach(w=>w.items.forEach(it=>codes.add(it.code)));
+    const smp=new Map();(s.smPending||[]).forEach(o=>{if(o&&o.key)smp.set(o.key,o)});
+    PP={ok:true,err:'',wos,codes,rows,smPending:smp,savedAt:s.savedAt||'',sopAt:(s.sopDemand&&s.sopDemand.pastedAt)||''};
+    build();render();
+  }).catch(e=>{PP.ok=false;PP.err=e&&e.message?e.message:'could not reach it';render()});
+}
+function fetchSP(){
+  fetch(SP_URL+'?t='+Date.now()).then(r=>{if(!r.ok)throw new Error('HTTP '+r.status);return r.json()}).then(s=>{
+    const codes=new Set();(s.rows||[]).forEach(r=>{const c=String(r.code||'').toUpperCase();if(c)codes.add(c)});
+    const cPOs=(s.cPOs||[]).filter(c=>c&&c.date&&Array.isArray(c.items)).map(c=>({ref:c.ref||'',date:c.date,
+      items:c.items.map(i=>({code:String(i.code||'').toUpperCase(),qty:num(i.qty)})).filter(i=>i.code&&i.qty>0)})).sort((a,b)=>a.date.localeCompare(b.date));
+    cPOs.forEach(c=>c.items.forEach(i=>codes.add(baseCode(i.code))));
+    SP={ok:true,err:'',cPOs,codes,nextContDate:s.nextContDate||'',savedAt:s.savedAt||''};
+    build();render();
+  }).catch(e=>{SP.ok=false;SP.err=e&&e.message?e.message:'could not reach it';render()});
+}
+
+/* ── classification ────────────────────────────────────────────────────── */
+function isMadeMfr(m){m=(m||'').trim().toLowerCase();return m!==''&&SET.made.some(x=>x.trim().toLowerCase()===m)}
+function isCharge(s){return !!s&&SET.groups.includes((s.grp||'').trim())}
+function isClockworkPO(l){return CLOCKWORK_ACCTS.includes(l.acct)||/clockwork/i.test(l.acctName||'')}
+
+/* ── build the model ───────────────────────────────────────────────────── */
+function build(){
+  ORDERS=[];ORD_IDX=new Map();LINES=[];POOLS=new Map();
+  if(!DATA.so.length)return;
+  const t=today();
+  // stock rows by company|code
+  const stkIdx=new Map();DATA.stk.forEach(s=>stkIdx.set(s.co+'|'+s.code,s));
+  const stkFor=(co,code)=>stkIdx.get(co+'|'+code)||null;
+  const anyStk=code=>stkFor('TIBARD',code)||stkFor('OLIVER HARVEY',code)||stkFor('TIBARD','BULK'+code)||stkFor('OLIVER HARVEY','BULK'+code);
+  // made-in-house test per base code
+  const madeCache=new Map();
+  const isMade=base=>{
+    if(madeCache.has(base))return madeCache.get(base);
+    let m=PP.codes.has(base)||SP.codes.has(base);
+    if(!m){const cands=[stkFor('TIBARD',base),stkFor('OLIVER HARVEY',base),stkFor('TIBARD','BULK'+base),stkFor('OLIVER HARVEY','BULK'+base)];m=cands.some(s=>s&&isMadeMfr(s.mfr))}
+    madeCache.set(base,m);return m;
+  };
+  // orders and lines
+  DATA.so.forEach(l=>{
+    const k=l.co+'|'+soNo(l.doc);
+    let o=ORD_IDX.get(k);
+    if(!o){o={key:k,co:l.co,doc:soNo(l.doc),docRaw:l.doc,acct:l.acct,acctName:l.acctName,ref:l.ref,promised:l.date,added:l.added,user:l.user,hold:l.hold,ic:l.ic,lines:[]};ORD_IDX.set(k,o);ORDERS.push(o)}
+    if(l.date&&(!o.promised||l.date<o.promised))o.promised=l.date;   // header date is on every line; keep the earliest just in case
+    if(l.hold)o.hold=true; if(l.ic)o.ic=true;
+    const base=baseCode(l.code);
+    const s=stkFor(l.co,l.code)||stkFor(l.co,base);
+    const ln={key:l.key,pkey:l.key.replace(/-SO-/,'-'),co:l.co,order:o,doc:o.doc,code:l.code,base,desc:l.desc||(s&&s.name)||'',seq:l.seq,q1:l.q1,q2:l.q2,out:l.out,alloc:Math.min(l.alloc,l.out),
+      promised:l.date,hold:l.hold,ic:l.ic,link:soNo(l.link),stk:s,charge:isCharge(s),made:false,sources:[],expected:null,status:'',contested:false,contestNote:''};
+    ln.made=!ln.charge&&isMade(base);
+    ln.freetext=/^FREETEXT/.test(l.code);
+    o.lines.push(ln);LINES.push(ln);
+  });
+  ORDERS.forEach(o=>o.lines.sort((a,b)=>a.seq-b.seq));
+
+  // ── pools: who gets the stock, works orders, containers and POs ──
+  const poolKey=ln=>(ln.made&&SET.share?'ALL':ln.co)+'|'+ln.base;
+  const demand=LINES.filter(ln=>ln.out>0&&!ln.charge&&!ln.freetext&&(SET.holdSO||!ln.hold));
+  const byPool=new Map();
+  demand.forEach(ln=>{const k=poolKey(ln);if(!byPool.has(k))byPool.set(k,[]);byPool.get(k).push(ln)});
+  const fifo=(a,b)=>(a.promised||'9999').localeCompare(b.promised||'9999')||(a.order.added||'9999').localeCompare(b.order.added||'9999')||a.doc.localeCompare(b.doc)||a.seq-b.seq;
+  // Sage PO lines, live, with outstanding, by code
+  const poByCode=new Map();
+  DATA.po.filter(p=>p.out>0&&!p.hold).forEach(p=>{const b=baseCode(p.code);if(!poByCode.has(b))poByCode.set(b,[]);poByCode.get(b).push({src:p,left:p.out,isCont:isClockworkPO(p),date:pd(p.date)})});
+  // special-make works orders keyed by the line they were raised for
+  const smWO=new Map();PP.wos.forEach(w=>{if(w.sm&&w.sm.lineKey)smWO.set(w.sm.lineKey,w)});
+
+  byPool.forEach((lines,key)=>{
+    lines.sort(fifo);
+    const [scope,base]=key.split('|');
+    const cos=scope==='ALL'?['TIBARD','OLIVER HARVEY']:[scope];
+    const shared=scope==='ALL';
+    // stock: the base code and its BULK item, in the companies in scope
+    let stock=0;const stockBits=[];
+    cos.forEach(co=>[base,'BULK'+base].forEach(code=>{const s=stkFor(co,code);if(s&&s.free>0){stock+=s.free;stockBits.push(coShort(co)+(code!==base?' bulk':'')+' '+fmt(s.free))}}));
+    const stockTotal=stock;
+    // works orders carrying the code (special makes are for their own line)
+    const wos=[];PP.wos.forEach(w=>{if(w.sm)return;w.items.forEach(it=>{if(baseCode(it.code)===base)wos.push({w,left:it.qty})})});
+    wos.sort((a,b)=>(a.w.createdAt||'').localeCompare(b.w.createdAt||'')||a.w.i-b.w.i);
+    // containers (stock planner), landing order
+    const conts=SP.cPOs.map(c=>({c,left:c.items.filter(i=>baseCode(i.code)===base).reduce((x,i)=>x+i.qty,0)})).filter(c=>c.left>0);
+    const onCont=conts.length>0;
+    // purchase orders: in scope companies; Clockwork POs stand in for a container only when the planner has none;
+    // the OH→Tibard (TIB001) PO is left out of a shared pool, where Tibard's stock already counts
+    const pos=(poByCode.get(base)||[]).filter(p=>cos.includes(p.src.co)&&!(p.isCont&&onCont)&&!(shared&&p.src.ic));
+    pos.sort((a,b)=>(a.date?iso(a.date):'9999').localeCompare(b.date?iso(b.date):'9999')||a.src.doc.localeCompare(b.src.doc));
+    let wi=0,ci=0;
+    const stockTakers=[];let shortAfterStock=0;
+    lines.forEach(ln=>{
+      if(shared&&ln.ic){ln.sources.push({t:'mirror',qty:ln.out});return}   // the OH customer line carries this demand
+      let need=ln.out;const src=ln.sources;
+      if(ln.alloc>0){const q=Math.min(ln.alloc,need);need-=q;src.push({t:'alloc',qty:q})}
+      if(need<=0)return;
+      // a special make raised for this very line
+      const sm=smWO.get(ln.pkey);
+      if(sm){const q=Math.min(need,sm.items.reduce((x,i)=>x+i.qty,0)||need);need-=q;src.push({t:'wo',qty:q,ref:sm.ref,due:sm.due,sm:true,printed:sm.printed})}
+      if(need>0&&!sm&&PP.smPending.has(ln.pkey)){src.push({t:'smpend',qty:need,seen:(PP.smPending.get(ln.pkey)||{}).seenAt||''});need=0}
+      // stock, oldest promised first
+      if(need>0&&stock>0){const q=Math.min(stock,need);stock-=q;need-=q;src.push({t:'stock',qty:q});stockTakers.push(ln)}
+      // the back-to-back PO Sage generated from this order
+      if(need>0&&ln.link){pos.filter(p=>soNo(p.src.doc)===ln.link&&p.left>0).forEach(p=>{if(need<=0)return;const q=Math.min(p.left,need);p.left-=q;need-=q;src.push({t:'po',qty:q,po:p,b2b:true})})}
+      // works orders, oldest raised first
+      while(need>0&&wi<wos.length){const w=wos[wi];const q=Math.min(w.left,need);if(q>0){w.left-=q;need-=q;src.push({t:'wo',qty:q,ref:w.w.ref,due:w.w.due,printed:w.w.printed,embOnly:w.w.embOnly})}if(w.left<=0)wi++}
+      // containers, landing order
+      while(need>0&&ci<conts.length){const c=conts[ci];const q=Math.min(c.left,need);if(q>0){c.left-=q;need-=q;src.push({t:'cont',qty:q,ref:c.c.ref,date:c.c.date})}if(c.left<=0)ci++}
+      // purchase orders, earliest date first
+      for(const p of pos){if(need<=0)break;if(p.left<=0)continue;const q=Math.min(p.left,need);p.left-=q;need-=q;src.push({t:'po',qty:q,po:p})}
+      if(need>0){src.push({t:'short',qty:need});if(stockTotal>0)shortAfterStock+=need}
+      ln.stockLeft=stock;
+    });
+    // contested: stock ran out before every order was served
+    const unserved=lines.filter(ln=>ln.sources.some(s=>s.t!=='stock'&&s.t!=='alloc'&&s.t!=='mirror'));
+    if(stockTakers.length&&unserved.length){
+      const others=unserved.filter(u=>!stockTakers.includes(u));
+      const wanted=lines.filter(ln=>!ln.ic||!shared).reduce((x,l)=>x+l.out,0);
+      stockTakers.forEach(ln=>{ln.contested=true;ln.contestNote=`Stock ${fmt(stockTotal)} but ${fmt(wanted)} wanted across ${lines.length} live lines; ${others.length?others.length+' other order'+(others.length>1?'s':'')+' go'+(others.length>1?'':'es')+' short':'this code runs out'}. Stock covers the oldest promised date first.`});
+    }
+    POOLS.set(key,{key,base,scope,lines,stock:stockTotal,stockBits,wos,conts,pos});
+  });
+
+  // ── dates and status per line ──
+  const tibByRef=new Map();   // Tibard orders on OLIVER, keyed by the numbers in their reference (= the OH PO number)
+  ORDERS.filter(o=>o.co==='TIBARD'&&o.ic).forEach(o=>{(String(o.ref||'').match(/\d{4,}/g)||[]).forEach(n=>tibByRef.set(n.replace(/^0+/,''),o))});
+  const lineDate=ln=>{
+    let exp=t,unknown=false,anyWait=false;
+    ln.sources.forEach(s=>{
+      let d=null;
+      if(s.t==='alloc'||s.t==='stock'||s.t==='mirror')d=t;
+      else if(s.t==='wo'){d=pd(s.due);if(!d)unknown=true;else if(d<t)d=t;anyWait=true;s.when=d}
+      else if(s.t==='cont'){d=nextWorkDay(pd(s.date),1);anyWait=true;s.when=d}
+      else if(s.t==='po'){anyWait=true;const p=s.po.src;
+        if(p.ic&&p.co==='OLIVER HARVEY'){   // OH buying from Tibard: follow the mirror Tibard order
+          const to=tibByRef.get(soNo(p.doc));const tl=to&&to.lines.find(x=>baseCode(x.code)===ln.base&&x.out>0);
+          if(tl){s.via=tl;d=tl.expected||null;if(tl.status==='short'||tl.unknown)unknown=true}
+          else{d=s.po.date;if(!d)unknown=true}
+        }else{d=s.po.date;if(!d)unknown=true;else if(d<t)d=t}
+        s.when=d}
+      else if(s.t==='smpend'){unknown=true;anyWait=true}
+      else if(s.t==='short'){unknown=true;anyWait=true}
+      if(d&&d>exp)exp=d;
+    });
+    ln.unknown=unknown;ln.expected=unknown?null:exp;ln.waiting=anyWait;
+    const prom=pd(ln.promised);ln.promD=prom;
+    if(ln.out<=0)ln.status='done';
+    else if(ln.charge||ln.freetext)ln.status='na';
+    else if(ln.hold&&!SET.holdSO)ln.status='hold';
+    else if(prom&&prom<t)ln.status='late';
+    else if(ln.sources.some(s=>s.t==='short'||s.t==='smpend'))ln.status='short';
+    else if(unknown)ln.status='risk';
+    else if(!anyWait)ln.status='stock';
+    else if(prom&&exp>prom)ln.status='risk';
+    else ln.status='covered';
+  };
+  // Tibard lines first so the OH→Tibard chain can read their expected date
+  LINES.filter(l=>l.co==='TIBARD').forEach(lineDate);
+  LINES.filter(l=>l.co!=='TIBARD').forEach(lineDate);
+
+  // ── order roll-up ──
+  ORDERS.forEach(o=>{
+    const live=o.lines.filter(l=>l.out>0&&!l.charge&&!l.freetext);
+    o.outLines=live.length;o.outQty=live.reduce((x,l)=>x+l.out,0);o.ordQty=o.lines.reduce((x,l)=>x+l.q1,0);o.despQty=o.lines.reduce((x,l)=>x+l.q2,0);
+    o.promD=pd(o.promised);o.days=o.promD?dayDiff(o.promD,t):null;
+    const waiting=live.filter(l=>l.waiting);
+    o.waiting=waiting;
+    let exp=t,unk=false;live.forEach(l=>{if(l.unknown)unk=true;else if(l.expected&&l.expected>exp)exp=l.expected});
+    o.expected=unk?null:exp;o.unknown=unk;
+    o.contested=live.some(l=>l.contested);
+    const kinds=new Set();waiting.forEach(l=>l.sources.forEach(s=>{
+      if(s.t==='wo'||s.t==='cont'||s.t==='smpend')kinds.add('made');
+      else if(s.t==='po')kinds.add(s.via?(s.via.made?'made':'bought'):'bought');
+      else if(s.t==='short')kinds.add(l.made?'made':'bought');
+    }));
+    o.group=kinds.size===0?'':kinds.size===2?'both':[...kinds][0];
+    if(!live.length)o.status='done';
+    else if(o.hold&&!SET.holdSO)o.status='hold';
+    else if(o.days!=null&&o.days<0)o.status='late';
+    else if(live.some(l=>l.status==='short'||l.status==='risk'))o.status='risk';
+    else if(!waiting.length)o.status='stock';
+    else o.status='covered';
+    o.hay=(o.doc+' '+o.acctName+' '+o.acct+' '+o.ref+' '+o.user+' '+o.lines.map(l=>l.code+' '+l.desc).join(' ')).toLowerCase();
+  });
+  computeJumps();
+}
+
+/* ── queue jumping: stock sitting against an order that cannot go anyway ──
+   An order waiting on a works order, container or PO still holds the stock
+   its other lines were given. If that stock would complete another order in
+   full, the sales office may want to borrow it. This lists those cases; the
+   call is theirs. Lenders are taken from the order waiting longest first. */
+function computeJumps(){
+  JUMPS=[];
+  const stockQty=l=>l.sources.filter(s=>s.t==='stock').reduce((x,s)=>x+s.qty,0);
+  const needQty=l=>l.sources.filter(s=>s.t!=='stock'&&s.t!=='alloc'&&s.t!=='mirror').reduce((x,s)=>x+s.qty,0);
+  const pk=ln=>(ln.made&&SET.share?'ALL':ln.co)+'|'+ln.base;
+  ORDERS.forEach(o=>{
+    if(o.ic||!(o.status==='late'||o.status==='risk'||o.status==='covered'))return;
+    const needs=o.waiting.filter(l=>needQty(l)>0);
+    if(!needs.length)return;
+    const plan=[];let ok=true;const used=new Map();
+    for(const ln of needs){
+      const p=POOLS.get(pk(ln));if(!p){ok=false;break}
+      const deficit=needQty(ln);
+      const lenders=p.lines.filter(l=>l.order!==o&&!l.order.ic&&stockQty(l)>0&&l.order.waiting.length>0&&l.order.status!=='hold')
+        .map(l=>({l,q:stockQty(l)-(used.get(l.key)||0)})).filter(x=>x.q>0)
+        .sort((a,b)=>{const ea=a.l.order.unknown?'9999':iso(a.l.order.expected),eb=b.l.order.unknown?'9999':iso(b.l.order.expected);return eb.localeCompare(ea)||(a.l.promised||'').localeCompare(b.l.promised||'')});
+      const avail=lenders.reduce((x,y)=>x+y.q,0);
+      if(avail<deficit){ok=false;break}
+      let left=deficit;const from=[];
+      for(const x of lenders){if(left<=0)break;const q=Math.min(x.q,left);left-=q;used.set(x.l.key,(used.get(x.l.key)||0)+q);from.push({line:x.l,qty:q})}
+      // backfill: the earliest delivery of this code on its way, assigned to anyone or not
+      let backfill=null;const t=today();const cand=(when,label)=>{if(when&&(!backfill||when<backfill.when))backfill={when,label}};
+      p.wos.forEach(w=>{const d=pd(w.w.due);cand(d&&d<t?t:d,w.w.ref)});
+      p.conts.forEach(c=>cand(nextWorkDay(pd(c.c.date),1),c.c.ref));
+      p.pos.forEach(x=>{if(x.date)cand(x.date<t?t:x.date,'PO '+soNo(x.src.doc))});
+      plan.push({ln,deficit,from,backfill});
+    }
+    if(ok&&plan.length)JUMPS.push({order:o,plan});
+  });
+  JUMPS.sort((a,b)=>(a.order.days==null?9999:a.order.days)-(b.order.days==null?9999:b.order.days));
+}
+
+/* ── filters and sets ──────────────────────────────────────────────────── */
+function vis(o){
+  if(o.ic)return false;                       // intercompany mirrors never listed
+  if(UI.co&&o.co!==UI.co)return false;
+  if(UI.q&&!o.hay.includes(UI.q))return false;
+  return true;
+}
+const liveOrders=()=>ORDERS.filter(o=>o.status!=='done'&&vis(o));
+const riskOrders=()=>liveOrders().filter(o=>o.status==='late'||o.status==='risk');
+
+/* ── labels ────────────────────────────────────────────────────────────── */
+const STATUS_PILL={late:['p-red','Late'],risk:['p-amber','At risk'],short:['p-red','Not on order'],covered:['p-blue','Covered'],stock:['p-green','In stock'],done:['p-grey','Despatched'],hold:['p-grey','On hold'],na:['p-grey','n/a']};
+const pill=st=>{const p=STATUS_PILL[st]||['p-grey',st];return `<span class="pill ${p[0]}">${p[1]}</span>`};
+const GROUP_LABEL={bought:'Bought in',made:'Made in house',both:'Waiting on both',"":'–'};
+const WAIT_LABEL={bought:'a supplier purchase order',made:'production (a works order or container)',both:'production and a supplier',"":'nothing'};
+const groupPill=g=>g==='bought'?'<span class="pill p-gold">Bought in</span>':g==='made'?'<span class="pill p-blue">Made in house</span>':g==='both'?'<span class="pill p-grey">Both</span>':'';
+function daysCell(o){if(o.days==null)return '<span class="sm">no date</span>';const d=o.days;const cls=d<0?'late':d<=SET.soon?'soon':'';return `<span class="days ${cls}">${d<0?Math.abs(d)+'d late':d===0?'today':d+'d'}</span>`}
+function srcChip(s,ln){
+  const q=fmt(s.qty);
+  switch(s.t){
+    case 'alloc':return `<span class="src alloc"><b>${q}</b> allocated in Sage</span>`;
+    case 'stock':return `<span class="src stock"><b>${q}</b> in stock${ln&&ln.contested?' &#9888;':''}</span>`;
+    case 'mirror':return `<span class="src done">intercompany mirror – see the OH order</span>`;
+    case 'wo':return `<span class="src wo"><b>${q}</b> on ${esc(s.ref)}${s.sm?' (special make)':''}${s.embOnly?' (EMB)':''} <span class="d">· due ${s.due?fd(pd(s.due)):'?'}${s.when&&pd(s.due)&&pd(s.due)<today()?' · overdue':''}${s.printed===false?' · not printed':''}</span></span>`;
+    case 'smpend':return `<span class="src short"><b>${q}</b> special make – no works order yet${s.seen?' <span class="d">(seen '+fd(pd(s.seen))+')</span>':''}</span>`;
+    case 'cont':return `<span class="src cont"><b>${q}</b> on ${esc(s.ref)} <span class="d">· lands ${fd(pd(s.date))}, out ${fd(s.when)}</span></span>`;
+    case 'po':{const p=s.po.src;const who=p.ic?'Tibard (intercompany)':(p.acctName||p.acct||'supplier');
+      let txt=`<span class="src ${p.ic?'via':'po'}"><b>${q}</b> on PO ${esc(soNo(p.doc))}${s.b2b?' (back to back)':''} <span class="d">· ${esc(who)}${p.ic?'':' · '+(s.po.date?'due '+fd(s.po.date):'no date')}${s.po.isCont?' · Clockwork':''}</span></span>`;
+      if(s.via){const v=s.via;txt+=`<span class="src via">&rarr; Tibard SO ${esc(v.doc)}: ${v.sources.map(x=>srcChip(x,v)).join('')}</span>`}
+      return txt}
+    case 'short':return `<span class="src short"><b>${q}</b> not on order <span class="d">· ${ln&&ln.made?'made in house – needs a works order'+(SP.codes.has(ln.base)?' or container':''):'bought in – needs a PO'}</span></span>`;
+  }
+  return '';
+}
+function lineWhere(ln){
+  if(ln.out<=0)return `<span class="src done">despatched</span>`;
+  if(ln.charge)return `<span class="src done">charge line</span>`;
+  if(ln.freetext)return `<span class="src done">free text</span>`;
+  if(ln.hold&&!SET.holdSO)return `<span class="src done">order on hold</span>`;
+  let h=ln.sources.map(s=>srcChip(s,ln)).join('');
+  if(ln.contested)h+=`<div class="warnflag" title="${esc(ln.contestNote)}">&#9888; Stock contested – ${esc(ln.contestNote)}</div>`;
+  if(ln.stk&&ln.stk.missing)h+=`<div class="warnflag">Code not in the ${coShort(ln.co)} stock file</div>`;
+  return h;
+}
+function expCell(ln){if(ln.out<=0||ln.charge||ln.freetext)return '–';if(ln.unknown)return '<span class="sm">unknown</span>';const d=ln.expected;const p=ln.promD;return `<span${p&&d>p?' style="color:var(--red);font-weight:700"':''}>${fd(d)}</span>`}
+function orderExp(o){if(o.unknown)return '<span class="sm">unknown</span>';if(!o.waiting.length)return '<span class="sm">now</span>';const p=o.promD;return `<span${p&&o.expected>p?' style="color:var(--red);font-weight:700"':''}>${fd(o.expected)}</span>`}
+function waitSummary(o){
+  const parts=[];const seen=new Set();
+  o.waiting.forEach(l=>l.sources.forEach(s=>{
+    let k='';
+    if(s.t==='wo')k=s.ref+' due '+(s.due?fd(pd(s.due)):'?');
+    else if(s.t==='cont')k=s.ref+' lands '+fd(pd(s.date));
+    else if(s.t==='po')k=(s.po.src.ic?'via Tibard PO ':'PO ')+soNo(s.po.src.doc)+(s.po.src.ic?'':' '+(s.po.src.acctName||'')+' '+(s.po.date?fd(s.po.date):'no date'));
+    else if(s.t==='short')k=(l.made?'not on a works order':'no PO')+': '+l.base;
+    else if(s.t==='smpend')k='special make, no WO: '+l.base;
+    if(k&&!seen.has(k)){seen.add(k);parts.push(k)}
+  }));
+  return parts.slice(0,4).map(esc).join('<br>')+(parts.length>4?'<br><span class="sm">+'+(parts.length-4)+' more</span>':'');
+}
+
+/* ── render ────────────────────────────────────────────────────────────── */
+function render(){
+  renderHeader();
+  document.querySelectorAll('#tabs button').forEach(b=>b.classList.toggle('on',b.dataset.t===UI.tab));
+  const live=ORDERS.filter(o=>o.status!=='done'&&!o.ic);
+  document.getElementById('n-risk').textContent=live.filter(o=>o.status==='late'||o.status==='risk').length;
+  document.getElementById('n-all').textContent=live.length;
+  document.getElementById('n-jump').textContent=JUMPS.filter(j=>!j.order.ic).length;
+  document.getElementById('filters').style.display=(UI.tab==='find'||UI.tab==='data')?'none':'';
+  const v=document.getElementById('view');
+  if(!DATA.so.length&&UI.tab!=='data'){v.innerHTML=`<div class="card"><div class="empty"><b>No data yet</b>${IS_EDITOR?'Press <b>Paste today\'s data</b> and paste the Order tracker query output.':'Nothing has been published yet. The sales manager pastes the day\'s Sage data and presses Publish for team.'}</div></div>`;return}
+  if(UI.tab==='find')renderFind(v);else if(UI.tab==='risk')renderRisk(v);else if(UI.tab==='jump')renderJump(v);else if(UI.tab==='all')renderAll(v);else renderData(v);
+}
+function renderHeader(){
+  const h=document.getElementById('hdrStatus');
+  if(!DATA.so.length){h.innerHTML='No data loaded';return}
+  const live=ORDERS.filter(o=>o.status!=='done'&&!o.ic).length;
+  h.innerHTML=`<b>${live}</b> live orders · Sage ${DATA.ts?fdt(DATA.ts):'?'}<br>WOs ${PP.ok?fdt(PP.savedAt):'<span style="color:#fca5a5">not read</span>'} · containers ${SP.ok?fdt(SP.savedAt):'<span style="color:#fca5a5">not read</span>'}`;
+}
+
+// ── Find an order ──
+function renderFind(v){
+  const q=UI.find.trim();
+  let h=`<div class="find"><input type="search" id="findQ" value="${esc(UI.find)}" placeholder="Sales order number – or a customer, their order ref, a product code" autocomplete="off"><button class="btn btn-navy" onclick="doFind()">Find</button></div>
+  <div class="hint">Tibard orders are usually 8xxxxx, Oliver Harvey 1xxxxx. Leading zeros are not needed. Despatched and completed orders are not in the daily feed.</div>`;
+  if(!q){
+    const late=ORDERS.filter(o=>!o.ic&&o.status==='late').length,risk=ORDERS.filter(o=>!o.ic&&o.status==='risk').length;
+    h+=`<div class="tiles"><div class="tile red" onclick="goTab('risk')"><b>${late}</b><span>late orders</span></div><div class="tile amber" onclick="goTab('risk')"><b>${risk}</b><span>at risk</span></div><div class="tile green" onclick="goTab('all')"><b>${ORDERS.filter(o=>!o.ic&&o.status==='stock').length}</b><span>fully in stock</span></div><div class="tile steel" onclick="goTab('all')"><b>${ORDERS.filter(o=>!o.ic&&o.status==='covered').length}</b><span>covered, on its way</span></div></div>`;
+    v.innerHTML=h;wireFind();return;
+  }
+  const qn=q.replace(/^0+/,'');
+  const exact=ORDERS.filter(o=>!o.ic&&o.doc===qn);
+  let open=null;
+  if(UI.open){open=ORD_IDX.get(UI.open)||null;if(open&&open.ic)open=null}
+  if(!open&&exact.length===1)open=exact[0];
+  if(open){h+=orderCard(open)}
+  else{
+    const ql=q.toLowerCase();
+    const hits=ORDERS.filter(o=>!o.ic&&(o.doc.includes(qn)||o.hay.includes(ql))).sort((a,b)=>(a.promised||'9999').localeCompare(b.promised||'9999'));
+    const ic=ORDERS.find(o=>o.ic&&o.doc===qn);
+    if(!hits.length)h+=`<div class="card"><div class="empty"><b>No live order matches “${esc(q)}”</b>${ic?'That number is an intercompany order ('+esc(ic.acctName)+'). Search for the customer\'s own order instead.':'It may be despatched or complete (not in the daily feed), on a different company, or not yet raised in Sage. Try the customer name or their order reference.'}</div></div>`;
+    else h+=`<div class="card"><h2>${hits.length} matching order${hits.length>1?'s':''}<span class="r">click one to open it</span></h2>${orderTable(hits.slice(0,100),'find')}</div>`;
+  }
+  v.innerHTML=h;wireFind();
+}
+function wireFind(){const i=document.getElementById('findQ');if(!i)return;i.addEventListener('keydown',e=>{if(e.key==='Enter')doFind()});if(!UI.open)i.focus();}
+function doFind(){const i=document.getElementById('findQ');UI.find=i?i.value:'';UI.open=null;UI.openLine={};location.hash=UI.find?'#so='+encodeURIComponent(UI.find.trim()):'';render()}
+function openOrder(key){const o=ORD_IDX.get(key);if(!o)return;UI.open=key;UI.find=o.doc;UI.tab='find';UI.openLine={};location.hash='#so='+o.doc+(o.co==='OLIVER HARVEY'?'&co=oh':'');render();window.scrollTo(0,0)}
+function goTab(t){UI.tab=t;render()}
+
+function orderCard(o){
+  const t=today();
+  const lateDays=o.days!=null&&o.days<0?Math.abs(o.days):0;
+  let why='',cls='ok';
+  if(o.status==='done')why='<b>Fully despatched.</b>';
+  else if(o.status==='hold')why='<b>On hold in Sage.</b> Nothing is set against it until it is released.';
+  else if(o.status==='stock')why=`<b>Everything outstanding is in stock${o.contested?', but some of it is contested':''}.</b> ${fmt(o.outQty)} units on ${o.outLines} line${o.outLines>1?'s':''} can be picked now.`;
+  else{
+    const shorts=o.waiting.filter(l=>l.status==='short');const risky=o.waiting.filter(l=>l.status==='risk'||(l.status==='late'&&(l.unknown||(l.promD&&l.expected&&l.expected>l.promD))));
+    const okWait=o.waiting.filter(l=>l.status==='covered');
+    cls=o.status==='late'?'bad':o.status==='risk'?'warn':'ok';
+    why=(o.status==='late'?`<b>${lateDays} day${lateDays>1?'s':''} past the promised date.</b> `:o.status==='risk'?'<b>At risk of missing the promised date.</b> ':'<b>On track.</b> ')
+      +`${o.waiting.length} of ${o.outLines} outstanding line${o.outLines>1?'s':''} ${o.waiting.length===1?'is':'are'} waiting on ${WAIT_LABEL[o.group]}. `
+      +(shorts.length?`<b>${shorts.length} line${shorts.length>1?'s have':' has'} nothing on order</b> (${[...new Set(shorts.map(l=>l.base))].slice(0,5).join(', ')}). `:'')
+      +(risky.length&&!shorts.length?`Cover arrives after the promised date${o.unknown?' or on an unknown date':''}. `:'')
+      +(o.expected?`Expected complete <b>${fdl(o.expected)}</b>${o.promD&&o.expected>o.promD?` (promised ${fdl(o.promD)})`:''}.`:o.unknown?'Completion date unknown until the missing items are ordered or dated.':'');
+    if(o.contested)why+=' <b>Stock contested</b> on at least one line – see the ⚠ below.';
+  }
+  const prog=o.ordQty?Math.round(o.despQty/o.ordQty*100):0;
+  let h=`<div class="card">
+    <h2>${coTag(o.co)} <span style="font-size:18px">SO ${esc(o.doc)}</span> ${pill(o.status)}${o.hold?' <span class="pill p-grey">On hold</span>':''}${o.group?' '+groupPill(o.group):''}<span class="r">${o.user?'raised by '+esc(o.user)+' · ':''}${prog}% despatched</span></h2>
+    <div class="ord-head">
+      <div><div class="lab">Customer</div><div class="val">${esc(o.acctName)}<span class="sm">${esc(o.acct)}</span></div></div>
+      <div><div class="lab">Their order ref</div><div class="val">${esc(o.ref)||'–'}</div></div>
+      <div><div class="lab">Order date (added to Sage)</div><div class="val">${fdl(pd(o.added))}</div></div>
+      <div><div class="lab">Promised date</div><div class="val">${fdl(o.promD)}<span class="sm">${daysCell(o)}</span></div></div>
+      <div><div class="lab">Expected complete</div><div class="val">${orderExp(o)}</div></div>
+      <div><div class="lab">Outstanding</div><div class="val">${fmt(o.outQty)} of ${fmt(o.ordQty)}<span class="sm">${o.outLines} line${o.outLines===1?'':'s'} to go</span></div></div>
+    </div>
+    <div class="why ${cls}">${why}</div>
+    <div class="tw"><table><thead><tr><th>#</th><th>Code</th><th class="num">Ordered</th><th class="num">Sent</th><th class="num">To go</th><th>Where it is</th><th>Expected</th><th>Status</th></tr></thead><tbody>`;
+  o.lines.forEach(ln=>{
+    const open=UI.openLine[ln.key];
+    h+=`<tr class="row" onclick="toggleLine('${esc(ln.key)}')"><td class="num">${ln.seq||''}</td><td><span class="code">${esc(ln.code)}</span><div class="desc">${esc(ln.desc)}</div></td><td class="num">${fmt(ln.q1)}</td><td class="num">${fmt(ln.q2)}</td><td class="num"><b>${fmt(ln.out)}</b></td><td>${lineWhere(ln)}</td><td>${expCell(ln)}</td><td>${pill(ln.status)}</td></tr>`;
+    if(open)h+=`<tr class="det"><td colspan="8">${lineDetail(ln)}</td></tr>`;
+  });
+  h+=`</tbody></table></div><div class="note">Click a line to see every live order that wants the same code, in the order the stock goes out. Dates: works order due date; container landing day + 1 working day; PO requested date. “Not on order” means no stock, works order, container or PO covers it.</div></div>`;
+  return h;
+}
+function toggleLine(k){UI.openLine[k]=!UI.openLine[k];render()}
+function lineDetail(ln){
+  const key=(ln.made&&SET.share?'ALL':ln.co)+'|'+ln.base;
+  const p=POOLS.get(key);
+  if(ln.out<=0)return '<div class="det"><span class="sm">Despatched line.</span></div>';
+  if(!p)return `<div class="det"><span class="sm">${ln.charge?'Charge line – never holds an order up.':ln.hold?'Order on hold – not in the stock queue.':'No queue for this code.'}</span></div>`;
+  let h=`<div class="det"><h4>${esc(ln.base)} · ${ln.made?'made in house':'bought in'} · stock ${fmt(p.stock)}${p.stockBits.length?' ('+esc(p.stockBits.join(', '))+')':''}`;
+  if(p.wos.length)h+=` · works orders: ${p.wos.map(w=>esc(w.w.ref)+' '+fmt(w.w.items.filter(i=>baseCode(i.code)===ln.base).reduce((x,i)=>x+i.qty,0))+' due '+(w.w.due?fd(pd(w.w.due)):'?')).join(', ')}`;
+  if(p.conts.length)h+=` · containers: ${p.conts.map(c=>esc(c.c.ref)+' '+fmt(c.c.items.filter(i=>baseCode(i.code)===ln.base).reduce((x,i)=>x+i.qty,0))+' lands '+fd(pd(c.c.date))).join(', ')}`;
+  if(p.pos.length)h+=` · POs: ${p.pos.map(x=>'PO '+esc(soNo(x.src.doc))+' '+fmt(x.src.out)+' '+esc(x.src.acctName||'')+' '+(x.date?fd(x.date):'no date')).join(', ')}`;
+  h+=`</h4><table><thead><tr><th>Order</th><th>Customer</th><th>Promised</th><th>Ordered</th><th class="num">Qty</th><th>Covered by</th></tr></thead><tbody>`;
+  p.lines.forEach(l=>{
+    const me=l.key===ln.key;
+    h+=`<tr${me?' style="background:#fdf9ef;font-weight:600"':''}><td>${coTag(l.co)} ${l.ic?'<span class="sm">intercompany</span> ':''}<a href="javascript:void(0)" onclick="openOrder('${esc(l.order.key)}')">SO ${esc(l.doc)}</a>${me?' (this one)':''}</td><td>${esc(l.order.acctName)}</td><td>${fd(l.promD)}</td><td>${fd(pd(l.order.added))}</td><td class="num">${fmt(l.out)}</td><td>${l.sources.map(s=>srcChip(s,l)).join('')||'–'}</td></tr>`;
+  });
+  h+='</tbody></table></div>';
+  return h;
+}
+
+// ── tables ──
+function sortBy(list,tab,def){
+  const s=UI.sort[tab]||def;
+  const key=s.k,dir=s.d;
+  const val=o=>{switch(key){case 'so':return o.doc;case 'cust':return o.acctName.toLowerCase();case 'prom':return o.promised||'9999';case 'added':return o.added||'9999';case 'exp':return o.unknown?'9999':iso(o.expected);case 'days':return o.days==null?9999:o.days;case 'out':return o.outQty;case 'status':return ({late:0,risk:1,covered:2,stock:3,hold:4}[o.status]||5);case 'group':return o.group;default:return o.doc}};
+  return list.slice().sort((a,b)=>{const x=val(a),y=val(b);return (x<y?-1:x>y?1:0)*(dir==='d'?-1:1)||a.doc.localeCompare(b.doc)});
+}
+function th(tab,k,label,cls){const s=UI.sort[tab];const on=s&&s.k===k;return `<th class="sortable ${cls||''} ${on?(s.d==='d'?'sd':'s'):''}" onclick="setSort('${tab}','${k}')">${label}</th>`}
+function setSort(tab,k){const s=UI.sort[tab];UI.sort[tab]=s&&s.k===k?{k,d:s.d==='a'?'d':'a'}:{k,d:'a'};render()}
+function orderTable(list,tab){
+  if(!list.length)return '<div class="empty">Nothing here.</div>';
+  let h=`<div class="tw"><table><thead><tr>${th(tab,'status','Status')}${th(tab,'so','Order')}${th(tab,'cust','Customer')}${th(tab,'added','Ordered')}${th(tab,'prom','Promised')}${th(tab,'days','Days')}${th(tab,'out','To go','num')}<th>Waiting on</th>${th(tab,'exp','Expected')}${th(tab,'group','Type')}</tr></thead><tbody>`;
+  list.forEach(o=>{
+    h+=`<tr class="row" onclick="openOrder('${esc(o.key)}')"><td>${pill(o.status)}${o.contested?' <span class="pill p-amber" title="Stock contested on at least one line">&#9888;</span>':''}${o.hold?' <span class="pill p-grey">Hold</span>':''}</td><td>${coTag(o.co)} <span class="code">${esc(o.doc)}</span></td><td>${esc(o.acctName)}<div class="desc">${esc(o.ref)}</div></td><td>${fd(pd(o.added))}</td><td>${fd(o.promD)}</td><td>${daysCell(o)}</td><td class="num">${fmt(o.outQty)}<div class="sm">${o.outLines} line${o.outLines===1?'':'s'}</div></td><td class="sm" style="color:var(--txt)">${o.waiting.length?waitSummary(o):'<span class="sm">in stock</span>'}</td><td>${orderExp(o)}</td><td>${groupPill(o.group)}</td></tr>`;
+  });
+  return h+'</tbody></table></div>';
+}
+
+// ── Late & at risk ──
+function renderRisk(v){
+  const all=riskOrders();
+  const late=all.filter(o=>o.status==='late'),risk=all.filter(o=>o.status==='risk');
+  const contested=liveOrders().filter(o=>o.contested);
+  const tiles=[['late','red',late.length,'late (promised date passed)'],['risk','amber',risk.length,'at risk'],['contested','amber',contested.length,'stock contested'],['soon','steel',liveOrders().filter(o=>o.days!=null&&o.days>=0&&o.days<=SET.soon).length,`due within ${SET.soon} days`]];
+  let h=`<div class="tiles">${tiles.map(t=>`<div class="tile ${t[1]} ${UI.tile===t[0]?'on':''}" onclick="setTile('${t[0]}')"><b>${t[2]}</b><span>${t[3]}</span></div>`).join('')}</div>`;
+  let list=all;
+  if(UI.tile==='late')list=late;else if(UI.tile==='risk')list=risk;else if(UI.tile==='contested')list=contested;else if(UI.tile==='soon')list=liveOrders().filter(o=>o.days!=null&&o.days>=0&&o.days<=SET.soon);
+  const groups=[['bought','Bought in','Waiting on a supplier PO'],['made','Made in house','Waiting on a works order or a Clockwork container – including codes usually bought from Clockwork that have a works order on'],['both','Waiting on both','Some lines on production, some on a supplier']];
+  const none=list.filter(o=>!o.group);
+  groups.forEach(g=>{
+    const rows=sortBy(list.filter(o=>o.group===g[0]),'risk-'+g[0],{k:'days',d:'a'});
+    h+=`<div class="sec"><h3>${g[1]} <span class="n">${rows.length}</span><span class="r">${g[2]} · <a href="javascript:void(0)" onclick="exportCsv('${g[0]}')">Export CSV</a></span></h3><div class="card" style="margin-top:8px">${orderTable(rows,'risk-'+g[0])}</div></div>`;
+  });
+  if(none.length)h+=`<div class="sec"><h3>Nothing waiting – date only <span class="n">${none.length}</span><span class="r">everything outstanding is in stock; the promised date has passed or is contested</span></h3><div class="card" style="margin-top:8px">${orderTable(sortBy(none,'risk-none',{k:'days',d:'a'}),'risk-none')}</div></div>`;
+  h+=`<div class="legend"><span><b>Late</b> = promised date (Sage order header) has passed with quantity still to go.</span><span><b>At risk</b> = a line's cover arrives after the promised date, or on an unknown date, or nothing is on order for it.</span><span><b>Contested</b> = the line has stock only because it is older than another live order that will go short.</span><span>Intercompany orders (OLIVER / TIB003) are not listed.</span></div>`;
+  v.innerHTML=h;
+}
+function setTile(t){UI.tile=UI.tile===t?'':t;render()}
+function exportCsv(g){
+  const all=riskOrders();
+  let list=all;if(UI.tile==='late')list=all.filter(o=>o.status==='late');else if(UI.tile==='risk')list=all.filter(o=>o.status==='risk');else if(UI.tile==='contested')list=liveOrders().filter(o=>o.contested);
+  const rows=sortBy(list.filter(o=>o.group===g),'risk-'+g,{k:'days',d:'a'});
+  const cell=s=>'"'+String(s==null?'':s).replace(/"/g,'""')+'"';
+  const lines=[['Status','Company','SO','Customer','Account','Their ref','Ordered','Promised','Days','Lines to go','Qty to go','Waiting on','Expected','Type'].map(cell).join(',')];
+  rows.forEach(o=>{
+    const w=[];const seen=new Set();o.waiting.forEach(l=>l.sources.forEach(s=>{let k='';if(s.t==='wo')k=l.base+': '+s.ref+' due '+(s.due||'?');else if(s.t==='cont')k=l.base+': '+s.ref+' lands '+s.date;else if(s.t==='po')k=l.base+': PO '+soNo(s.po.src.doc)+' '+(s.po.src.acctName||'')+' '+(s.po.src.date||'no date');else if(s.t==='short')k=l.base+': not on order';else if(s.t==='smpend')k=l.base+': special make, no WO';if(k&&!seen.has(k)){seen.add(k);w.push(k)}}));
+    lines.push([STATUS_PILL[o.status][1],o.co,o.doc,o.acctName,o.acct,o.ref,o.added,o.promised,o.days,o.outLines,o.outQty,w.join(' | '),o.unknown?'unknown':iso(o.expected),GROUP_LABEL[o.group]].map(cell).join(','));
+  });
+  const a=document.createElement('a');a.href=URL.createObjectURL(new Blob(['﻿'+lines.join('\r\n')],{type:'text/csv'}));a.download='late-at-risk-'+g+'-'+iso(today())+'.csv';document.body.appendChild(a);a.click();setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove()},500);
+}
+
+// ── Can jump the queue ──
+function renderJump(v){
+  const rows=JUMPS.filter(j=>vis(j.order));
+  document.getElementById('rc').textContent=rows.length+' orders';
+  let h=`<div class="card"><h2>Orders that could go out in full by borrowing stock<span class="r">the call is yours – nothing here changes Sage</span></h2>
+  <div class="note">Each order below is short on one or more lines, but the missing units are sitting in stock against another order that cannot go out anyway (it is waiting on a works order, container or PO). Borrowing them completes this order in full. <b>Lender</b> shows who the stock is held for, what they are waiting on, and whether the next delivery of the code (<b>backfill</b>) lands before they could ship regardless. Stock held for the order waiting longest is offered first.</div>`;
+  if(!rows.length){h+='<div class="empty"><b>Nothing can jump the queue</b>No short line can be completed from stock that is held for a waiting order.</div></div>';v.innerHTML=h;return}
+  h+=`<div class="tw"><table><thead><tr><th>Status</th><th>Order</th><th>Customer</th><th>Promised</th><th>Days</th><th class="num">To go</th><th>Borrow</th><th>Lender – waiting on</th></tr></thead><tbody>`;
+  rows.forEach(j=>{const o=j.order;
+    const borrow=j.plan.map(pl=>`<div><span class="code">${esc(pl.ln.base)}</span> <b>${fmt(pl.deficit)}</b> ${pl.from.map(f=>'← '+fmt(f.qty)+' from '+coShort(f.line.co)+' SO <a href="javascript:void(0)" onclick="event.stopPropagation();openOrder(\''+esc(f.line.order.key)+'\')">'+esc(f.line.doc)+'</a>').join(', ')}</div>`).join('');
+    const seen=new Set();const lend=[];
+    j.plan.forEach(pl=>pl.from.forEach(f=>{const lo=f.line.order;if(seen.has(lo.key))return;seen.add(lo.key);
+      const bf=pl.backfill;const until=lo.unknown?'unknown date':fd(lo.expected);
+      let impact='';
+      if(!bf)impact='<span style="color:var(--red)">no backfill on order – lender goes short</span>';
+      else if(!lo.unknown&&bf.when<=lo.expected)impact=`backfill ${esc(bf.label)} ${fd(bf.when)} – lender unaffected`;
+      else impact=`backfill ${esc(bf.label)} ${fd(bf.when)}${lo.unknown?'':' – <span style="color:var(--amber)">lender slips to then</span>'}`;
+      lend.push(`<div><b>SO ${esc(lo.doc)}</b> ${esc(lo.acctName)} · promised ${fd(lo.promD)} · waiting until <b>${until}</b> on ${waitSummary(lo).split('<br>')[0]}<div class="sm">${impact}</div></div>`)}));
+    h+=`<tr class="row" onclick="openOrder('${esc(o.key)}')"><td>${pill(o.status)}</td><td>${coTag(o.co)} <span class="code">${esc(o.doc)}</span></td><td>${esc(o.acctName)}<div class="desc">${esc(o.ref)}</div></td><td>${fd(o.promD)}</td><td>${daysCell(o)}</td><td class="num">${fmt(o.outQty)}<div class="sm">${o.outLines} line${o.outLines===1?'':'s'}</div></td><td class="summary-list">${borrow}</td><td class="summary-list">${lend.join('')}</td></tr>`;
+  });
+  h+='</tbody></table></div></div>';
+  v.innerHTML=h;
+}
+
+// ── All live orders ──
+function renderAll(v){
+  const rows=sortBy(liveOrders(),'all',{k:'prom',d:'a'});
+  document.getElementById('rc').textContent=rows.length+' orders';
+  v.innerHTML=`<div class="card"><h2>All live orders<span class="r">sorted by promised date · click an order to open it</span></h2>${orderTable(rows,'all')}</div>`;
+}
+
+// ── Data tab ──
+function renderData(v){
+  const t=DATA.ts?fdt(DATA.ts):'–';
+  v.innerHTML=`<div class="card"><h2>Where the data comes from</h2><div class="note">
+  <b>Sage</b> (sales orders, purchase orders, stock): pasted ${t}${DATA.pubAt?' · published '+fdt(DATA.pubAt):''} · ${DATA.so.length} SO lines, ${DATA.po.length} PO lines, ${DATA.stk.length} stock rows.<br>
+  <b>Works orders</b>: production planner, ${PP.ok?'published '+fdt(PP.savedAt)+' · '+PP.wos.length+' live works orders · SOP demand pasted '+fdt(PP.sopAt):'<span style="color:var(--red)">not read ('+esc(PP.err)+')</span>'}.<br>
+  <b>Containers</b>: stock planner, ${SP.ok?'published '+fdt(SP.savedAt)+' · '+SP.cPOs.map(c=>esc(c.ref)+' lands '+fd(pd(c.date))).join(', ')+(SP.nextContDate?' · next order date '+fd(pd(SP.nextContDate)):''):'<span style="color:var(--red)">not read ('+esc(SP.err)+')</span>'}.<br><br>
+  <b>Who gets the stock</b>: Sage allocation first, then free stock to the oldest promised date, then a special-make works order raised for the line, the back-to-back PO Sage generated from the order, live works orders (oldest raised first), containers in landing order, and purchase orders by date. Made-in-house codes${SET.share?' share Tibard, BULK and OH stock as one pool':' are per company'}; bought-in codes are per company. Held orders ${SET.holdSO?'count as':'do not take'} demand.<br><br>
+  <b>Version</b> ${APP_VER}. Order tracker, Tibard Apps. Tomorrow: this paste is replaced by the live Sage link when the apps move on-prem.
+  </div></div>`;
+}
+
+/* ── editor: paste, settings, publish ──────────────────────────────────── */
+function openPaste(){document.getElementById('pasteTa').value='';document.getElementById('pasteMsg').textContent='';document.getElementById('pasteOv').classList.add('show');document.getElementById('pasteTa').focus()}
+function closeOv(id){document.getElementById(id).classList.remove('show')}
+function loadPaste(){
+  const raw=document.getElementById('pasteTa').value;const r=parseRaw(raw);const m=document.getElementById('pasteMsg');
+  if(!r.so.length&&!r.stk.length){m.className='msg bad';m.textContent='No rows recognised – paste columns A to AD from the query.';return}
+  const ts=new Date().toISOString();
+  try{localStorage.setItem(LS_RAW,raw);localStorage.setItem(LS_TS,ts)}catch(e){}
+  applyRaw(raw,ts);closeOv('pasteOv');
+  m.className='msg ok';m.textContent='';
+}
+function applyRaw(raw,ts,pubAt){const r=parseRaw(raw);DATA={so:r.so,po:r.po,stk:r.stk,ts:ts||null,bad:r.bad,pubAt:pubAt||null};build();render()}
+function openSettings(){
+  document.getElementById('sMade').value=SET.made.join('\n');document.getElementById('sGroups').value=SET.groups.join(', ');
+  document.getElementById('sShare').checked=!!SET.share;document.getElementById('sHoldSO').checked=!!SET.holdSO;document.getElementById('sSoon').value=SET.soon;
+  document.getElementById('setMsg').textContent='';document.getElementById('setOv').classList.add('show');
+}
+function saveSettings(){
+  SET.made=document.getElementById('sMade').value.split('\n').map(s=>s.trim()).filter(Boolean);
+  SET.groups=document.getElementById('sGroups').value.split(',').map(s=>s.trim()).filter(Boolean);
+  SET.share=document.getElementById('sShare').checked;SET.holdSO=document.getElementById('sHoldSO').checked;SET.soon=Math.max(0,num(document.getElementById('sSoon').value));
+  lsSet(LS_SET,SET);build();render();closeOv('setOv');
+}
+function clearSaved(){if(!confirm('Forget the data pasted on this PC and reload what was last published?'))return;try{localStorage.removeItem(LS_RAW);localStorage.removeItem(LS_TS)}catch(e){}DATA={so:[],po:[],stk:[],ts:null};build();render();closeOv('setOv');fetchShared()}
+function applyMode(){const badge=document.getElementById('modeBadge');if(IS_EDITOR){badge.textContent='EDITOR';badge.style.background='#065f46'}else{badge.textContent='VIEW ONLY';document.body.classList.add('viewer-mode')}}
+
+const PUB_REPO='Luke5446/SOPtracker', PUB_API='https://api.github.com/repos/'+PUB_REPO+'/contents/data.json', LS_TOKEN='ordertracker_token';
+function pubToken(){try{return localStorage.getItem(LS_TOKEN)||''}catch(e){return ''}}
+function pubSetup(){
+  if(!IS_EDITOR)return;
+  const cur=pubToken();
+  const t=prompt('Paste the GitHub publishing token for this PC (fine-grained token with Contents: read and write on '+PUB_REPO+').\n\nLeave empty and press OK to remove the token from this PC.',cur?'(kept)':'');
+  if(t===null)return;
+  try{if(!t)localStorage.removeItem(LS_TOKEN);else if(t!=='(kept)')localStorage.setItem(LS_TOKEN,t.trim())}catch(e){alert('Could not keep the token in this browser.')}
+  pubRefreshBtn();
+}
+function pubRefreshBtn(){const b=document.getElementById('pubSetupBtn');if(b)b.innerHTML=pubToken()?'&#9881; Token':'&#9881; Set up this PC';const pb=document.getElementById('pubBtn');if(pb)pb.title=pubToken()?'Puts data.json into the repo; the team sees it within a minute':'Needs a token: click Set up this PC and paste the publishing token';const w=document.getElementById('pubWarn');if(w&&pubToken())w.style.display='none'}
+function pubNoToken(){
+  let w=document.getElementById('pubWarn');
+  if(!w){w=document.createElement('span');w.id='pubWarn';w.style.cssText='color:#fff;background:#dc2626;font-weight:700;font-size:12px;padding:3px 8px;border-radius:6px;cursor:pointer;white-space:nowrap';w.title='Click Set up this PC and paste the publishing token';w.onclick=pubSetup;
+    const pb=document.getElementById('pubBtn');if(pb&&pb.parentNode)pb.parentNode.insertBefore(w,pb.nextSibling);else document.body.appendChild(w)}
+  w.innerHTML='&#9888; Please add a token to publish';w.style.display='';
+}
+const pubB64=s=>btoa(unescape(encodeURIComponent(s)));
+function publishDownload(json,why){
+  const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([json],{type:'application/json'}));a.download='data.json';document.body.appendChild(a);a.click();
+  setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove()},500);
+  alert((why?why+'\n\n':'')+'data.json downloaded.\n\nUpload it to the SOPtracker GitHub repo (replacing the old data.json) and commit. The team will see the update within a minute.');
+}
+let pubBusy=false;
+function publishTeam(){
+  if(!IS_EDITOR){alert('View-only mode.');return}
+  if(pubBusy)return;
+  const raw=localStorage.getItem(LS_RAW)||'';
+  if(!raw||!DATA.so.length){alert('Paste today\'s data first.');return}
+  const state={app:'ordertracker',ver:APP_VER,raw,ts:DATA.ts||new Date().toISOString(),settings:SET,so:DATA.so.length,po:DATA.po.length,stk:DATA.stk.length,savedAt:new Date().toISOString()};
+  const json=JSON.stringify(state),tok=pubToken();
+  if(!tok){pubNoToken();return}
+  const pb=document.getElementById('pubBtn'),was=pb.innerHTML;
+  pubBusy=true;pb.innerHTML='&#8987; Publishing&hellip;';
+  const done=(ok,err)=>{pubBusy=false;pb.innerHTML=was;
+    if(ok){pb.innerHTML='&#10003; Published';setTimeout(()=>{pb.innerHTML=was},4000);DATA.pubAt=state.savedAt;render()}
+    else publishDownload(json,'GitHub did not take the publish ('+err+').')};
+  const headers={'Authorization':'Bearer '+tok,'Accept':'application/vnd.github+json'};
+  const attempt=n=>{
+    fetch(PUB_API+'?t='+Date.now(),{headers,cache:'no-store'})
+      .then(r=>{if(r.status===404)return {sha:null};if(!r.ok)throw new Error('GitHub said '+r.status+(r.status===401?' (token refused)':r.status===403?' (token cannot write this repo)':''));return r.json()})
+      .then(j=>{const body={message:'Order tracker data published '+new Date().toISOString().slice(0,16).replace('T',' '),content:pubB64(json)};if(j.sha)body.sha=j.sha;
+        return fetch(PUB_API,{method:'PUT',headers:Object.assign({'Content-Type':'application/json'},headers),body:JSON.stringify(body)})})
+      .then(r=>{if((r.status===409||r.status===422)&&n<3){attempt(n+1);return}if(!r.ok)throw new Error('GitHub refused the save ('+r.status+')');done(true)})
+      .catch(e=>done(false,String(e.message||e)));
+  };
+  attempt(1);
+}
+function fetchShared(cb,localTs){
+  fetch('data.json?t='+Date.now()).then(r=>{if(!r.ok)throw new Error('no data.json');return r.json()}).then(s=>{
+    if(s&&s.raw&&localTs&&(s.ts||'')<=localTs){if(cb)cb(true);return}   // this PC's paste is as new or newer: keep it
+    if(s&&s.raw){
+      if(s.settings&&!IS_EDITOR)SET=Object.assign({},DEF_SET,s.settings);
+      if(IS_EDITOR){try{localStorage.setItem(LS_RAW,s.raw);localStorage.setItem(LS_TS,s.ts||'')}catch(e){}}
+      applyRaw(s.raw,s.ts||null,s.savedAt||null);
+      const bd=document.getElementById('bannerDate');if(bd&&s.savedAt)bd.textContent='(published '+fdt(s.savedAt)+')';
+    }
+    if(cb)cb(true);
+  }).catch(()=>{if(cb)cb(false)});
+}
+
+/* ── wiring ────────────────────────────────────────────────────────────── */
+document.querySelectorAll('#tabs button').forEach(b=>b.addEventListener('click',()=>{UI.tab=b.dataset.t;render()}));
+document.querySelectorAll('#coSeg button').forEach(b=>b.addEventListener('click',()=>{document.querySelectorAll('#coSeg button').forEach(x=>x.classList.remove('on'));b.classList.add('on');UI.co=b.dataset.co;render()}));
+document.getElementById('q').addEventListener('input',e=>{UI.q=e.target.value.trim().toLowerCase();render()});
+document.querySelectorAll('.ov').forEach(o=>o.addEventListener('click',e=>{if(e.target===o)o.classList.remove('show')}));
+function readHash(){const m=/[#&]so=([^&]+)/.exec(location.hash);if(m){UI.find=decodeURIComponent(m[1]);UI.tab='find';const co=/[#&]co=oh/.test(location.hash)?'OLIVER HARVEY':'TIBARD';UI.open=null;const k=co+'|'+UI.find.replace(/^0+/,'');if(ORD_IDX.has(k))UI.open=k}}
+window.addEventListener('hashchange',()=>{readHash();render()});
+(function init(){
+  applyMode();pubRefreshBtn();readHash();
+  fetchPP();fetchSP();
+  if(IS_EDITOR){
+    const raw=localStorage.getItem(LS_RAW);
+    if(raw)applyRaw(raw,localStorage.getItem(LS_TS));else render();
+    fetchShared(()=>{readHash();render()},raw?localStorage.getItem(LS_TS)||'':'');
+  }else{render();fetchShared(()=>{readHash();render()})}
+})();
+</script>
+</body>
+</html>
