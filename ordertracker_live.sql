@@ -91,7 +91,14 @@
    SQL 1.xlsx: Power Query returns the first result set only - this script is
    one SELECT. Run it in a new workbook connection, Refresh All, then copy
    A to AD into the tracker's Paste box (editor mode, ?edit on the URL).
+   DEADLOCKS: on 6 Nov 2026 the first run was picked as a deadlock victim
+   (error 1205) by a Sage posting. This is a report, so it reads without
+   taking locks - the SET below is the standard reporting setting and the
+   figures are the same ones Sage shows. If Power Query ever rejects a SET
+   at the top, delete it and add WITH (NOLOCK) after each table name instead.
    ========================================================================= */
+
+SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;
 
 WITH so AS (
 
