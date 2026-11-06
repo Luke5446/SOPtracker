@@ -62,6 +62,11 @@ orders, containers) and nothing else.
 
 ## Changelog
 
+- v1.2 (6 Nov 2026) – whole-column pastes from Excel bring 150,000+ empty
+  rows with them, more than the browser will store, so Publish found nothing
+  saved ("Paste today's data first"). Blank rows and the header are now
+  dropped on load, Publish sends the paste held in memory, and a paste the
+  browser cannot keep says so and still publishes.
 - v1.1 (6 Nov 2026) – tested on the first real paste (6,127 SO lines).
   A works order or PO whose date has passed and is still not in now makes
   the line **at risk** and shows "overdue"; proforma and web accounts

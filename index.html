@@ -262,7 +262,7 @@ textarea{width:100%;min-height:150px;font-size:11px;font-family:Consolas,monospa
    "Contested": a line only has stock because it is older than another order
    that will go short on the same code.
    ═══════════════════════════════════════════════════════════════════════ */
-const APP_VER='1.1';
+const APP_VER='1.2';
 const LS_RAW='ordertracker_raw', LS_TS='ordertracker_ts', LS_SET='ordertracker_settings';
 const DEF_SET={
   made:['Tibard','Oliver Harvey','Clockwork','Clockwork Clothing','Clockwork Giant Clothing'],
@@ -271,6 +271,7 @@ const DEF_SET={
 const CLOCKWORK_ACCTS=['CLO003'];
 let SET=loadSettings();
 let DATA={so:[],po:[],stk:[],ts:null};
+let RAW='';                     // the paste as loaded (blank rows dropped); what Publish sends
 let ORDERS=[];                 // one per company + SO number
 let ORD_IDX=new Map();         // co|doc -> order
 let LINES=[];                  // every SO line
@@ -827,15 +828,22 @@ function renderData(v){
 /* ── editor: paste, settings, publish ──────────────────────────────────── */
 function openPaste(){document.getElementById('pasteTa').value='';document.getElementById('pasteMsg').textContent='';document.getElementById('pasteOv').classList.add('show');document.getElementById('pasteTa').focus()}
 function closeOv(id){document.getElementById(id).classList.remove('show')}
+// Whole-column pastes from Excel bring 150,000+ empty rows (just tabs) with
+// them - far more than the browser will store - so blank rows and the header
+// are dropped before anything is kept. Luke, 6 Nov 2026: the first real paste
+// could not be published for this reason.
+const compactRaw=raw=>raw.replace(/\r/g,'').split('\n').filter(l=>l.replace(/\t/g,'').trim()&&!/^RowType\t/.test(l)).join('\n');
 function loadPaste(){
-  const raw=document.getElementById('pasteTa').value;const r=parseRaw(raw);const m=document.getElementById('pasteMsg');
+  const raw=compactRaw(document.getElementById('pasteTa').value);const r=parseRaw(raw);const m=document.getElementById('pasteMsg');
   if(!r.so.length&&!r.stk.length){m.className='msg bad';m.textContent='No rows recognised – paste columns A to AD from the query.';return}
   const ts=new Date().toISOString();
-  try{localStorage.setItem(LS_RAW,raw);localStorage.setItem(LS_TS,ts)}catch(e){}
+  let kept=true;
+  try{localStorage.setItem(LS_RAW,raw);localStorage.setItem(LS_TS,ts)}catch(e){kept=false;try{localStorage.removeItem(LS_RAW)}catch(x){}}
   applyRaw(raw,ts);closeOv('pasteOv');
   m.className='msg ok';m.textContent='';
+  if(!kept)alert('Loaded '+r.so.length+' sales order lines, but the paste is too big for this browser to keep between sessions.\n\nPublish for team now; the published copy is what everyone (and this PC, next time) will read.');
 }
-function applyRaw(raw,ts,pubAt){const r=parseRaw(raw);DATA={so:r.so,po:r.po,stk:r.stk,ts:ts||null,bad:r.bad,pubAt:pubAt||null};build();render()}
+function applyRaw(raw,ts,pubAt){RAW=raw||'';const r=parseRaw(raw);DATA={so:r.so,po:r.po,stk:r.stk,ts:ts||null,bad:r.bad,pubAt:pubAt||null};build();render()}
 function openSettings(){
   document.getElementById('sMade').value=SET.made.join('\n');document.getElementById('sGroups').value=SET.groups.join(', ');
   document.getElementById('sShare').checked=!!SET.share;document.getElementById('sHoldSO').checked=!!SET.holdSO;document.getElementById('sSoon').value=SET.soon;
@@ -847,7 +855,7 @@ function saveSettings(){
   SET.share=document.getElementById('sShare').checked;SET.holdSO=document.getElementById('sHoldSO').checked;SET.soon=Math.max(0,num(document.getElementById('sSoon').value));
   lsSet(LS_SET,SET);build();render();closeOv('setOv');
 }
-function clearSaved(){if(!confirm('Forget the data pasted on this PC and reload what was last published?'))return;try{localStorage.removeItem(LS_RAW);localStorage.removeItem(LS_TS)}catch(e){}DATA={so:[],po:[],stk:[],ts:null};build();render();closeOv('setOv');fetchShared()}
+function clearSaved(){if(!confirm('Forget the data pasted on this PC and reload what was last published?'))return;try{localStorage.removeItem(LS_RAW);localStorage.removeItem(LS_TS)}catch(e){}RAW='';DATA={so:[],po:[],stk:[],ts:null};build();render();closeOv('setOv');fetchShared()}
 function applyMode(){const badge=document.getElementById('modeBadge');if(IS_EDITOR){badge.textContent='EDITOR';badge.style.background='#065f46'}else{badge.textContent='VIEW ONLY';document.body.classList.add('viewer-mode')}}
 
 const PUB_REPO='Luke5446/SOPtracker', PUB_API='https://api.github.com/repos/'+PUB_REPO+'/contents/data.json', LS_TOKEN='ordertracker_token';
@@ -877,7 +885,7 @@ let pubBusy=false;
 function publishTeam(){
   if(!IS_EDITOR){alert('View-only mode.');return}
   if(pubBusy)return;
-  const raw=localStorage.getItem(LS_RAW)||'';
+  const raw=RAW||'';
   if(!raw||!DATA.so.length){alert('Paste today\'s data first.');return}
   const state={app:'ordertracker',ver:APP_VER,raw,ts:DATA.ts||new Date().toISOString(),settings:SET,so:DATA.so.length,po:DATA.po.length,stk:DATA.stk.length,savedAt:new Date().toISOString()};
   const json=JSON.stringify(state),tok=pubToken();
