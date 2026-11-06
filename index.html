@@ -238,7 +238,7 @@ textarea{width:100%;min-height:150px;font-size:11px;font-family:Consolas,monospa
 
 <script>
 /* ═══════════════════════════════════════════════════════════════════════
-   Order tracker — data model  (v1.0, 6 Nov 2026)
+   Order tracker — data model  (v1.1, 6 Nov 2026: overdue WO/PO = at risk; proforma/online names from the reference)
 
    One daily paste from ordertracker_live.sql (columns A–AD, the POtracker
    layout): SO rows (every product line on a live or held sales order), PO
@@ -262,7 +262,7 @@ textarea{width:100%;min-height:150px;font-size:11px;font-family:Consolas,monospa
    "Contested": a line only has stock because it is older than another order
    that will go short on the same code.
    ═══════════════════════════════════════════════════════════════════════ */
-const APP_VER='1.0';
+const APP_VER='1.1';
 const LS_RAW='ordertracker_raw', LS_TS='ordertracker_ts', LS_SET='ordertracker_settings';
 const DEF_SET={
   made:['Tibard','Oliver Harvey','Clockwork','Clockwork Clothing','Clockwork Giant Clothing'],
@@ -298,6 +298,10 @@ const coTag=c=>c==='TIBARD'?'<span class="co co-t">TIB</span>':'<span class="co 
 const coShort=c=>c==='TIBARD'?'Tibard':'OH';
 const fmt=n=>Number.isInteger(n)?String(n):n.toFixed(2).replace(/\.?0+$/,'');
 const soNo=s=>String(s||'').replace(/^0+/,'');
+// Proforma and web accounts carry the real customer in the order reference
+// (the special makes / buffer sheets resolve names the same way)
+const PROFORMA_ACCTS=['PROFORMA','PROFEURO','XONLINE'];
+const custName=o=>{if(PROFORMA_ACCTS.includes((o.acct||'').toUpperCase())&&(o.ref||'').trim())return o.ref.trim().replace(/^(EMB|DTF):\s*/i,'');return o.acctName||o.acct||''};
 const baseCode=c=>c.replace(/^BULK/,'');
 // England & Wales bank holidays, so "one working day after" skips them
 const BANK_HOLS=new Set(['2026-01-01','2026-04-03','2026-04-06','2026-05-04','2026-05-25','2026-08-31','2026-12-25','2026-12-28',
@@ -461,31 +465,31 @@ function build(){
   const tibByRef=new Map();   // Tibard orders on OLIVER, keyed by the numbers in their reference (= the OH PO number)
   ORDERS.filter(o=>o.co==='TIBARD'&&o.ic).forEach(o=>{(String(o.ref||'').match(/\d{4,}/g)||[]).forEach(n=>tibByRef.set(n.replace(/^0+/,''),o))});
   const lineDate=ln=>{
-    let exp=t,unknown=false,anyWait=false;
+    let exp=t,unknown=false,anyWait=false,overdue=false;
     ln.sources.forEach(s=>{
       let d=null;
       if(s.t==='alloc'||s.t==='stock'||s.t==='mirror')d=t;
-      else if(s.t==='wo'){d=pd(s.due);if(!d)unknown=true;else if(d<t)d=t;anyWait=true;s.when=d}
+      else if(s.t==='wo'){d=pd(s.due);if(!d)unknown=true;else if(d<t){d=t;overdue=true;s.overdue=true}anyWait=true;s.when=d}
       else if(s.t==='cont'){d=nextWorkDay(pd(s.date),1);anyWait=true;s.when=d}
       else if(s.t==='po'){anyWait=true;const p=s.po.src;
         if(p.ic&&p.co==='OLIVER HARVEY'){   // OH buying from Tibard: follow the mirror Tibard order
           const to=tibByRef.get(soNo(p.doc));const tl=to&&to.lines.find(x=>baseCode(x.code)===ln.base&&x.out>0);
           if(tl){s.via=tl;d=tl.expected||null;if(tl.status==='short'||tl.unknown)unknown=true}
           else{d=s.po.date;if(!d)unknown=true}
-        }else{d=s.po.date;if(!d)unknown=true;else if(d<t)d=t}
+        }else{d=s.po.date;if(!d)unknown=true;else if(d<t){d=t;overdue=true;s.overdue=true}}
         s.when=d}
       else if(s.t==='smpend'){unknown=true;anyWait=true}
       else if(s.t==='short'){unknown=true;anyWait=true}
       if(d&&d>exp)exp=d;
     });
-    ln.unknown=unknown;ln.expected=unknown?null:exp;ln.waiting=anyWait;
+    ln.unknown=unknown;ln.expected=unknown?null:exp;ln.waiting=anyWait;ln.overdue=overdue;
     const prom=pd(ln.promised);ln.promD=prom;
     if(ln.out<=0)ln.status='done';
     else if(ln.charge||ln.freetext)ln.status='na';
     else if(ln.hold&&!SET.holdSO)ln.status='hold';
     else if(prom&&prom<t)ln.status='late';
     else if(ln.sources.some(s=>s.t==='short'||s.t==='smpend'))ln.status='short';
-    else if(unknown)ln.status='risk';
+    else if(unknown||overdue)ln.status='risk';   // overdue: the WO or PO date has passed and it is still not in
     else if(!anyWait)ln.status='stock';
     else if(prom&&exp>prom)ln.status='risk';
     else ln.status='covered';
@@ -581,11 +585,11 @@ function srcChip(s,ln){
     case 'alloc':return `<span class="src alloc"><b>${q}</b> allocated in Sage</span>`;
     case 'stock':return `<span class="src stock"><b>${q}</b> in stock${ln&&ln.contested?' &#9888;':''}</span>`;
     case 'mirror':return `<span class="src done">intercompany mirror – see the OH order</span>`;
-    case 'wo':return `<span class="src wo"><b>${q}</b> on ${esc(s.ref)}${s.sm?' (special make)':''}${s.embOnly?' (EMB)':''} <span class="d">· due ${s.due?fd(pd(s.due)):'?'}${s.when&&pd(s.due)&&pd(s.due)<today()?' · overdue':''}${s.printed===false?' · not printed':''}</span></span>`;
+    case 'wo':return `<span class="src wo"><b>${q}</b> on ${esc(s.ref)}${s.sm?' (special make)':''}${s.embOnly?' (EMB)':''} <span class="d">· due ${s.due?fd(pd(s.due)):'?'}${s.overdue?' · <b>overdue</b>':''}${s.printed===false?' · not printed':''}</span></span>`;
     case 'smpend':return `<span class="src short"><b>${q}</b> special make – no works order yet${s.seen?' <span class="d">(seen '+fd(pd(s.seen))+')</span>':''}</span>`;
     case 'cont':return `<span class="src cont"><b>${q}</b> on ${esc(s.ref)} <span class="d">· lands ${fd(pd(s.date))}, out ${fd(s.when)}</span></span>`;
     case 'po':{const p=s.po.src;const who=p.ic?'Tibard (intercompany)':(p.acctName||p.acct||'supplier');
-      let txt=`<span class="src ${p.ic?'via':'po'}"><b>${q}</b> on PO ${esc(soNo(p.doc))}${s.b2b?' (back to back)':''} <span class="d">· ${esc(who)}${p.ic?'':' · '+(s.po.date?'due '+fd(s.po.date):'no date')}${s.po.isCont?' · Clockwork':''}</span></span>`;
+      let txt=`<span class="src ${p.ic?'via':'po'}"><b>${q}</b> on PO ${esc(soNo(p.doc))}${s.b2b?' (back to back)':''} <span class="d">· ${esc(who)}${p.ic?'':' · '+(s.po.date?'due '+fd(s.po.date)+(s.overdue?' · <b>overdue</b>':''):'no date')}${s.po.isCont?' · Clockwork':''}</span></span>`;
       if(s.via){const v=s.via;txt+=`<span class="src via">&rarr; Tibard SO ${esc(v.doc)}: ${v.sources.map(x=>srcChip(x,v)).join('')}</span>`}
       return txt}
     case 'short':return `<span class="src short"><b>${q}</b> not on order <span class="d">· ${ln&&ln.made?'made in house – needs a works order'+(SP.codes.has(ln.base)?' or container':''):'bought in – needs a PO'}</span></span>`;
@@ -682,7 +686,7 @@ function orderCard(o){
     why=(o.status==='late'?`<b>${lateDays} day${lateDays>1?'s':''} past the promised date.</b> `:o.status==='risk'?'<b>At risk of missing the promised date.</b> ':'<b>On track.</b> ')
       +`${o.waiting.length} of ${o.outLines} outstanding line${o.outLines>1?'s':''} ${o.waiting.length===1?'is':'are'} waiting on ${WAIT_LABEL[o.group]}. `
       +(shorts.length?`<b>${shorts.length} line${shorts.length>1?'s have':' has'} nothing on order</b> (${[...new Set(shorts.map(l=>l.base))].slice(0,5).join(', ')}). `:'')
-      +(risky.length&&!shorts.length?`Cover arrives after the promised date${o.unknown?' or on an unknown date':''}. `:'')
+      +(risky.length&&!shorts.length?(o.waiting.some(l=>l.overdue)?`A works order or PO is <b>overdue</b> (its date has passed and it is still not in). `:`Cover arrives after the promised date${o.unknown?' or on an unknown date':''}. `):'')
       +(o.expected?`Expected complete <b>${fdl(o.expected)}</b>${o.promD&&o.expected>o.promD?` (promised ${fdl(o.promD)})`:''}.`:o.unknown?'Completion date unknown until the missing items are ordered or dated.':'');
     if(o.contested)why+=' <b>Stock contested</b> on at least one line – see the ⚠ below.';
   }
@@ -690,7 +694,7 @@ function orderCard(o){
   let h=`<div class="card">
     <h2>${coTag(o.co)} <span style="font-size:18px">SO ${esc(o.doc)}</span> ${pill(o.status)}${o.hold?' <span class="pill p-grey">On hold</span>':''}${o.group?' '+groupPill(o.group):''}<span class="r">${o.user?'raised by '+esc(o.user)+' · ':''}${prog}% despatched</span></h2>
     <div class="ord-head">
-      <div><div class="lab">Customer</div><div class="val">${esc(o.acctName)}<span class="sm">${esc(o.acct)}</span></div></div>
+      <div><div class="lab">Customer</div><div class="val">${esc(custName(o))}<span class="sm">${esc(o.acct)}${custName(o)!==o.acctName?' · '+esc(o.acctName):''}</span></div></div>
       <div><div class="lab">Their order ref</div><div class="val">${esc(o.ref)||'–'}</div></div>
       <div><div class="lab">Order date (added to Sage)</div><div class="val">${fdl(pd(o.added))}</div></div>
       <div><div class="lab">Promised date</div><div class="val">${fdl(o.promD)}<span class="sm">${daysCell(o)}</span></div></div>
@@ -720,7 +724,7 @@ function lineDetail(ln){
   h+=`</h4><table><thead><tr><th>Order</th><th>Customer</th><th>Promised</th><th>Ordered</th><th class="num">Qty</th><th>Covered by</th></tr></thead><tbody>`;
   p.lines.forEach(l=>{
     const me=l.key===ln.key;
-    h+=`<tr${me?' style="background:#fdf9ef;font-weight:600"':''}><td>${coTag(l.co)} ${l.ic?'<span class="sm">intercompany</span> ':''}<a href="javascript:void(0)" onclick="openOrder('${esc(l.order.key)}')">SO ${esc(l.doc)}</a>${me?' (this one)':''}</td><td>${esc(l.order.acctName)}</td><td>${fd(l.promD)}</td><td>${fd(pd(l.order.added))}</td><td class="num">${fmt(l.out)}</td><td>${l.sources.map(s=>srcChip(s,l)).join('')||'–'}</td></tr>`;
+    h+=`<tr${me?' style="background:#fdf9ef;font-weight:600"':''}><td>${coTag(l.co)} ${l.ic?'<span class="sm">intercompany</span> ':''}<a href="javascript:void(0)" onclick="openOrder('${esc(l.order.key)}')">SO ${esc(l.doc)}</a>${me?' (this one)':''}</td><td>${esc(custName(l.order))}</td><td>${fd(l.promD)}</td><td>${fd(pd(l.order.added))}</td><td class="num">${fmt(l.out)}</td><td>${l.sources.map(s=>srcChip(s,l)).join('')||'–'}</td></tr>`;
   });
   h+='</tbody></table></div>';
   return h;
@@ -739,7 +743,7 @@ function orderTable(list,tab){
   if(!list.length)return '<div class="empty">Nothing here.</div>';
   let h=`<div class="tw"><table><thead><tr>${th(tab,'status','Status')}${th(tab,'so','Order')}${th(tab,'cust','Customer')}${th(tab,'added','Ordered')}${th(tab,'prom','Promised')}${th(tab,'days','Days')}${th(tab,'out','To go','num')}<th>Waiting on</th>${th(tab,'exp','Expected')}${th(tab,'group','Type')}</tr></thead><tbody>`;
   list.forEach(o=>{
-    h+=`<tr class="row" onclick="openOrder('${esc(o.key)}')"><td>${pill(o.status)}${o.contested?' <span class="pill p-amber" title="Stock contested on at least one line">&#9888;</span>':''}${o.hold?' <span class="pill p-grey">Hold</span>':''}</td><td>${coTag(o.co)} <span class="code">${esc(o.doc)}</span></td><td>${esc(o.acctName)}<div class="desc">${esc(o.ref)}</div></td><td>${fd(pd(o.added))}</td><td>${fd(o.promD)}</td><td>${daysCell(o)}</td><td class="num">${fmt(o.outQty)}<div class="sm">${o.outLines} line${o.outLines===1?'':'s'}</div></td><td class="sm" style="color:var(--txt)">${o.waiting.length?waitSummary(o):'<span class="sm">in stock</span>'}</td><td>${orderExp(o)}</td><td>${groupPill(o.group)}</td></tr>`;
+    h+=`<tr class="row" onclick="openOrder('${esc(o.key)}')"><td>${pill(o.status)}${o.contested?' <span class="pill p-amber" title="Stock contested on at least one line">&#9888;</span>':''}${o.hold?' <span class="pill p-grey">Hold</span>':''}</td><td>${coTag(o.co)} <span class="code">${esc(o.doc)}</span></td><td>${esc(custName(o))}<div class="desc">${custName(o)===o.ref.trim().replace(/^(EMB|DTF):\s*/i,'')?esc(o.acctName):esc(o.ref)}</div></td><td>${fd(pd(o.added))}</td><td>${fd(o.promD)}</td><td>${daysCell(o)}</td><td class="num">${fmt(o.outQty)}<div class="sm">${o.outLines} line${o.outLines===1?'':'s'}</div></td><td class="sm" style="color:var(--txt)">${o.waiting.length?waitSummary(o):'<span class="sm">in stock</span>'}</td><td>${orderExp(o)}</td><td>${groupPill(o.group)}</td></tr>`;
   });
   return h+'</tbody></table></div>';
 }
@@ -760,7 +764,7 @@ function renderRisk(v){
     h+=`<div class="sec"><h3>${g[1]} <span class="n">${rows.length}</span><span class="r">${g[2]} · <a href="javascript:void(0)" onclick="exportCsv('${g[0]}')">Export CSV</a></span></h3><div class="card" style="margin-top:8px">${orderTable(rows,'risk-'+g[0])}</div></div>`;
   });
   if(none.length)h+=`<div class="sec"><h3>Nothing waiting – date only <span class="n">${none.length}</span><span class="r">everything outstanding is in stock; the promised date has passed or is contested</span></h3><div class="card" style="margin-top:8px">${orderTable(sortBy(none,'risk-none',{k:'days',d:'a'}),'risk-none')}</div></div>`;
-  h+=`<div class="legend"><span><b>Late</b> = promised date (Sage order header) has passed with quantity still to go.</span><span><b>At risk</b> = a line's cover arrives after the promised date, or on an unknown date, or nothing is on order for it.</span><span><b>Contested</b> = the line has stock only because it is older than another live order that will go short.</span><span>Intercompany orders (OLIVER / TIB003) are not listed.</span></div>`;
+  h+=`<div class="legend"><span><b>Late</b> = promised date (Sage order header) has passed with quantity still to go.</span><span><b>At risk</b> = a line's cover arrives after the promised date, or on an unknown date, or nothing is on order for it.</span><span><b>Contested</b> = the line has stock only because it is older than another live order that will go short.</span><span><b>Overdue</b> = a works order or PO date has passed and it is still not in.</span><span>Intercompany orders (OLIVER / TIB003) are not listed.</span></div>`;
   v.innerHTML=h;
 }
 function setTile(t){UI.tile=UI.tile===t?'':t;render()}
@@ -772,7 +776,7 @@ function exportCsv(g){
   const lines=[['Status','Company','SO','Customer','Account','Their ref','Ordered','Promised','Days','Lines to go','Qty to go','Waiting on','Expected','Type'].map(cell).join(',')];
   rows.forEach(o=>{
     const w=[];const seen=new Set();o.waiting.forEach(l=>l.sources.forEach(s=>{let k='';if(s.t==='wo')k=l.base+': '+s.ref+' due '+(s.due||'?');else if(s.t==='cont')k=l.base+': '+s.ref+' lands '+s.date;else if(s.t==='po')k=l.base+': PO '+soNo(s.po.src.doc)+' '+(s.po.src.acctName||'')+' '+(s.po.src.date||'no date');else if(s.t==='short')k=l.base+': not on order';else if(s.t==='smpend')k=l.base+': special make, no WO';if(k&&!seen.has(k)){seen.add(k);w.push(k)}}));
-    lines.push([STATUS_PILL[o.status][1],o.co,o.doc,o.acctName,o.acct,o.ref,o.added,o.promised,o.days,o.outLines,o.outQty,w.join(' | '),o.unknown?'unknown':iso(o.expected),GROUP_LABEL[o.group]].map(cell).join(','));
+    lines.push([STATUS_PILL[o.status][1],o.co,o.doc,custName(o),o.acct,o.ref,o.added,o.promised,o.days,o.outLines,o.outQty,w.join(' | '),o.unknown?'unknown':iso(o.expected),GROUP_LABEL[o.group]].map(cell).join(','));
   });
   const a=document.createElement('a');a.href=URL.createObjectURL(new Blob(['﻿'+lines.join('\r\n')],{type:'text/csv'}));a.download='late-at-risk-'+g+'-'+iso(today())+'.csv';document.body.appendChild(a);a.click();setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove()},500);
 }
@@ -794,8 +798,8 @@ function renderJump(v){
       if(!bf)impact='<span style="color:var(--red)">no backfill on order – lender goes short</span>';
       else if(!lo.unknown&&bf.when<=lo.expected)impact=`backfill ${esc(bf.label)} ${fd(bf.when)} – lender unaffected`;
       else impact=`backfill ${esc(bf.label)} ${fd(bf.when)}${lo.unknown?'':' – <span style="color:var(--amber)">lender slips to then</span>'}`;
-      lend.push(`<div><b>SO ${esc(lo.doc)}</b> ${esc(lo.acctName)} · promised ${fd(lo.promD)} · waiting until <b>${until}</b> on ${waitSummary(lo).split('<br>')[0]}<div class="sm">${impact}</div></div>`)}));
-    h+=`<tr class="row" onclick="openOrder('${esc(o.key)}')"><td>${pill(o.status)}</td><td>${coTag(o.co)} <span class="code">${esc(o.doc)}</span></td><td>${esc(o.acctName)}<div class="desc">${esc(o.ref)}</div></td><td>${fd(o.promD)}</td><td>${daysCell(o)}</td><td class="num">${fmt(o.outQty)}<div class="sm">${o.outLines} line${o.outLines===1?'':'s'}</div></td><td class="summary-list">${borrow}</td><td class="summary-list">${lend.join('')}</td></tr>`;
+      lend.push(`<div><b>SO ${esc(lo.doc)}</b> ${esc(custName(lo))} · promised ${fd(lo.promD)} · waiting until <b>${until}</b> on ${waitSummary(lo).split('<br>')[0]}<div class="sm">${impact}</div></div>`)}));
+    h+=`<tr class="row" onclick="openOrder('${esc(o.key)}')"><td>${pill(o.status)}</td><td>${coTag(o.co)} <span class="code">${esc(o.doc)}</span></td><td>${esc(custName(o))}<div class="desc">${esc(o.ref)}</div></td><td>${fd(o.promD)}</td><td>${daysCell(o)}</td><td class="num">${fmt(o.outQty)}<div class="sm">${o.outLines} line${o.outLines===1?'':'s'}</div></td><td class="summary-list">${borrow}</td><td class="summary-list">${lend.join('')}</td></tr>`;
   });
   h+='</tbody></table></div></div>';
   v.innerHTML=h;

@@ -62,5 +62,11 @@ orders, containers) and nothing else.
 
 ## Changelog
 
+- v1.1 (6 Nov 2026) – tested on the first real paste (6,127 SO lines).
+  A works order or PO whose date has passed and is still not in now makes
+  the line **at risk** and shows "overdue"; proforma and web accounts
+  (PROFORMA, PROFEURO, XONLINE) show the customer's name from the order
+  reference. SQL rewritten to read each Sage table once (table variables)
+  and run without locks.
 - v1.0 (6 Nov 2026) – first version: find an order, late & at risk in three
   groups, can jump the queue, all live orders, Sage paste + planner data.
