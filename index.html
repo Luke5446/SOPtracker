@@ -262,7 +262,7 @@ textarea{width:100%;min-height:150px;font-size:11px;font-family:Consolas,monospa
    "Contested": a line only has stock because it is older than another order
    that will go short on the same code.
    ═══════════════════════════════════════════════════════════════════════ */
-const APP_VER='1.2';
+const APP_VER='1.3';
 const LS_RAW='ordertracker_raw', LS_TS='ordertracker_ts', LS_SET='ordertracker_settings';
 const DEF_SET={
   made:['Tibard','Oliver Harvey','Clockwork','Clockwork Clothing','Clockwork Giant Clothing'],
@@ -648,11 +648,7 @@ function renderFind(v){
   const q=UI.find.trim();
   let h=`<div class="find"><input type="search" id="findQ" value="${esc(UI.find)}" placeholder="Sales order number – or a customer, their order ref, a product code" autocomplete="off"><button class="btn btn-navy" onclick="doFind()">Find</button></div>
   <div class="hint">Tibard orders are usually 8xxxxx, Oliver Harvey 1xxxxx. Leading zeros are not needed. Despatched and completed orders are not in the daily feed.</div>`;
-  if(!q){
-    const late=ORDERS.filter(o=>!o.ic&&o.status==='late').length,risk=ORDERS.filter(o=>!o.ic&&o.status==='risk').length;
-    h+=`<div class="tiles"><div class="tile red" onclick="goTab('risk')"><b>${late}</b><span>late orders</span></div><div class="tile amber" onclick="goTab('risk')"><b>${risk}</b><span>at risk</span></div><div class="tile green" onclick="goTab('all')"><b>${ORDERS.filter(o=>!o.ic&&o.status==='stock').length}</b><span>fully in stock</span></div><div class="tile steel" onclick="goTab('all')"><b>${ORDERS.filter(o=>!o.ic&&o.status==='covered').length}</b><span>covered, on its way</span></div></div>`;
-    v.innerHTML=h;wireFind();return;
-  }
+  if(!q){v.innerHTML=h;wireFind();return;}
   const qn=q.replace(/^0+/,'');
   const exact=ORDERS.filter(o=>!o.ic&&o.doc===qn);
   let open=null;
