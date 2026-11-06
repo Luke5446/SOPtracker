@@ -262,7 +262,7 @@ textarea{width:100%;min-height:150px;font-size:11px;font-family:Consolas,monospa
    "Contested": a line only has stock because it is older than another order
    that will go short on the same code.
    ═══════════════════════════════════════════════════════════════════════ */
-const APP_VER='1.4';
+const APP_VER='1.5';
 const LS_RAW='ordertracker_raw', LS_TS='ordertracker_ts', LS_SET='ordertracker_settings';
 const DEF_SET={
   made:['Tibard','Oliver Harvey','Clockwork','Clockwork Clothing','Clockwork Giant Clothing'],
@@ -669,8 +669,13 @@ function renderFind(v){
   }
   v.innerHTML=h;wireFind();
 }
-function wireFind(){const i=document.getElementById('findQ');if(!i)return;i.addEventListener('keydown',e=>{if(e.key==='Enter')doFind()});if(!UI.open)i.focus();}
-function doFind(){const i=document.getElementById('findQ');UI.find=i?i.value:'';UI.open=null;UI.openLine={};location.hash=UI.find?'#so='+encodeURIComponent(UI.find.trim()):'';render()}
+function wireFind(){const i=document.getElementById('findQ');if(!i)return;i.addEventListener('keydown',e=>{if(e.key==='Enter')doFind()});
+  // clearing the box (backspace or the × in the box) clears the results too – no need to press Find
+  i.addEventListener('input',()=>{if(!i.value.trim()&&UI.find.trim())doFind()});i.addEventListener('search',()=>{if(!i.value.trim())doFind()});
+  if(!UI.open)i.focus();}
+function doFind(){const i=document.getElementById('findQ');UI.find=i?i.value:'';UI.open=null;UI.openLine={};
+  // only an order number goes in the address bar (so a link to an order survives a refresh); a text search does not come back after a reload
+  const q=UI.find.trim();history.replaceState(null,'',location.pathname+location.search+(/^\d+$/.test(q)?'#so='+q:''));render()}
 function openOrder(key){const o=ORD_IDX.get(key);if(!o)return;UI.open=key;UI.find=o.doc;UI.tab='find';UI.openLine={};location.hash='#so='+o.doc+(o.co==='OLIVER HARVEY'?'&co=oh':'');render();window.scrollTo(0,0)}
 function goTab(t){UI.tab=t;render()}
 
