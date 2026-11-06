@@ -91,86 +91,128 @@
    SQL 1.xlsx: Power Query returns the first result set only - this script is
    one SELECT. Run it in a new workbook connection, Refresh All, then copy
    A to AD into the tracker's Paste box (editor mode, ?edit on the URL).
+   DEADLOCKS: on 6 Nov 2026 the first run was picked as a deadlock victim
+   (error 1205) by a Sage posting. This is a report, so it reads without
+   taking locks - READ UNCOMMITTED below is the standard reporting setting.
+
+   SPEED (6 Nov 2026): the first cut, written as one chain of CTEs, was still
+   running after 15 minutes. SQL Server re-runs a CTE every time it is named,
+   and the SO/PO blocks were named five or six times each, every time with two
+   correlated subqueries per line into MMS123BackToBackPO. This version
+   builds each step ONCE into a table variable (@so, @po, @codes, @stk) and
+   looks the back-to-back links up from two small pre-grouped tables, so each
+   Sage table is read once. Table variables rather than #temp tables because
+   Power Query reads the result shape before it runs the batch and #temp
+   tables are invisible to that check ("Invalid object name '#so'"). SET
+   NOCOUNT ON keeps the row-count messages out of the way so the final SELECT
+   is the only result. Text columns carry COLLATE DATABASE_DEFAULT because
+   tempdb on TIB-SQL-002 collates differently from S200_LIVE (error 468
+   otherwise). OPTION (RECOMPILE) lets SQL Server see the real row counts in
+   the table variables when it plans each step.
    ========================================================================= */
 
-WITH so AS (
 
+SET NOCOUNT ON;
+SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;
+
+/* Working tables. Text columns carry COLLATE DATABASE_DEFAULT - see SPEED. */
+DECLARE @b2bso TABLE (Company nvarchar(20) COLLATE DATABASE_DEFAULT, SOPOrderReturnID bigint,
+                      FirstDoc nvarchar(40) COLLATE DATABASE_DEFAULT, N int,
+                      PRIMARY KEY (Company, SOPOrderReturnID));
+DECLARE @b2bpo TABLE (Company nvarchar(20) COLLATE DATABASE_DEFAULT, POPOrderReturnID bigint,
+                      FirstDoc nvarchar(40) COLLATE DATABASE_DEFAULT, N int,
+                      PRIMARY KEY (Company, POPOrderReturnID));
+DECLARE @so TABLE (
+    Company nvarchar(20) COLLATE DATABASE_DEFAULT, RowKey nvarchar(60) COLLATE DATABASE_DEFAULT,
+    ProductCode nvarchar(60) COLLATE DATABASE_DEFAULT, Description nvarchar(255) COLLATE DATABASE_DEFAULT,
+    DocNo nvarchar(40) COLLATE DATABASE_DEFAULT, LineSeq int,
+    AccountNo nvarchar(40) COLLATE DATABASE_DEFAULT, AccountName nvarchar(255) COLLATE DATABASE_DEFAULT,
+    Reference nvarchar(255) COLLATE DATABASE_DEFAULT, DateISO nvarchar(10) COLLATE DATABASE_DEFAULT,
+    Qty1 decimal(18,2), Qty2 decimal(18,2), Qty3 decimal(18,2), Qty4 decimal(18,2),
+    FulfilMethodID nvarchar(10) COLLATE DATABASE_DEFAULT, LinkID nvarchar(40) COLLATE DATABASE_DEFAULT,
+    B2BCount nvarchar(10) COLLATE DATABASE_DEFAULT, Intercompany nvarchar(1) COLLATE DATABASE_DEFAULT,
+    DocStatusID nvarchar(10) COLLATE DATABASE_DEFAULT, OrderDate nvarchar(10) COLLATE DATABASE_DEFAULT,
+    EnteredBy nvarchar(255) COLLATE DATABASE_DEFAULT);
+DECLARE @po TABLE (
+    Company nvarchar(20) COLLATE DATABASE_DEFAULT, RowKey nvarchar(60) COLLATE DATABASE_DEFAULT,
+    ProductCode nvarchar(60) COLLATE DATABASE_DEFAULT, Description nvarchar(255) COLLATE DATABASE_DEFAULT,
+    DocNo nvarchar(40) COLLATE DATABASE_DEFAULT, LineSeq int,
+    AccountNo nvarchar(40) COLLATE DATABASE_DEFAULT, AccountName nvarchar(255) COLLATE DATABASE_DEFAULT,
+    Reference nvarchar(255) COLLATE DATABASE_DEFAULT, DateISO nvarchar(10) COLLATE DATABASE_DEFAULT,
+    Qty1 decimal(18,2), Qty2 decimal(18,2), Qty3 decimal(18,2), Qty4 decimal(18,2),
+    FulfilMethodID nvarchar(10) COLLATE DATABASE_DEFAULT, LinkID nvarchar(40) COLLATE DATABASE_DEFAULT,
+    B2BCount nvarchar(10) COLLATE DATABASE_DEFAULT, Intercompany nvarchar(1) COLLATE DATABASE_DEFAULT,
+    DocStatusID nvarchar(10) COLLATE DATABASE_DEFAULT, OrderDate nvarchar(10) COLLATE DATABASE_DEFAULT,
+    EnteredBy nvarchar(255) COLLATE DATABASE_DEFAULT);
+DECLARE @codes0 TABLE (Company nvarchar(20) COLLATE DATABASE_DEFAULT, ProductCode nvarchar(60) COLLATE DATABASE_DEFAULT,
+                       PRIMARY KEY (Company, ProductCode));
+DECLARE @codes  TABLE (Company nvarchar(20) COLLATE DATABASE_DEFAULT, ProductCode nvarchar(60) COLLATE DATABASE_DEFAULT,
+                       PRIMARY KEY (Company, ProductCode));
+DECLARE @b2b12  TABLE (Company nvarchar(20) COLLATE DATABASE_DEFAULT, ProductCode nvarchar(60) COLLATE DATABASE_DEFAULT, N int,
+                       PRIMARY KEY (Company, ProductCode));
+DECLARE @stk TABLE (
+    Company nvarchar(20) COLLATE DATABASE_DEFAULT, RowKey nvarchar(70) COLLATE DATABASE_DEFAULT,
+    ProductCode nvarchar(60) COLLATE DATABASE_DEFAULT, Description nvarchar(255) COLLATE DATABASE_DEFAULT,
+    AccountNo nvarchar(40) COLLATE DATABASE_DEFAULT, AccountName nvarchar(255) COLLATE DATABASE_DEFAULT,
+    Reference nvarchar(255) COLLATE DATABASE_DEFAULT,
+    Qty1 decimal(18,2), Qty2 decimal(18,2), Qty3 decimal(18,2), Qty4 decimal(18,2),
+    FulfilMethodID nvarchar(10) COLLATE DATABASE_DEFAULT, Manufacturer nvarchar(255) COLLATE DATABASE_DEFAULT,
+    StockHeld nvarchar(3) COLLATE DATABASE_DEFAULT, WebsiteOH nvarchar(3) COLLATE DATABASE_DEFAULT,
+    ProductGroup nvarchar(40) COLLATE DATABASE_DEFAULT, BOMItemTypeID nvarchar(10) COLLATE DATABASE_DEFAULT,
+    LeadTime nvarchar(10) COLLATE DATABASE_DEFAULT, LeadTimeUnitID nvarchar(10) COLLATE DATABASE_DEFAULT,
+    MOQ decimal(18,2), B2B12m nvarchar(10) COLLATE DATABASE_DEFAULT);
+
+/* ------------------------------------------------------------------------
+   1. Back-to-back links, grouped once. Sage links each generated PO to its
+   sales order in MMS123BackToBackPO. @b2bso: per sales order, the first PO
+   it generated and how many. @b2bpo: per purchase order, the first sales
+   order it came from and how many. If the Oliver Harvey half errors on
+   MMS123BackToBackPO, the table is not in that database - delete the OH half
+   of each statement (from UNION ALL to the end of the inner SELECT).
+   ------------------------------------------------------------------------ */
+INSERT INTO @b2bso (Company, SOPOrderReturnID, FirstDoc, N)
+SELECT 'TIBARD', b.SOPOrderReturnID, MIN(lpo.DocumentNo), COUNT(*)
+FROM   S200_LIVE.dbo.MMS123BackToBackPO b
+JOIN   S200_LIVE.dbo.POPOrderReturn lpo ON lpo.POPOrderReturnID = b.POPOrderReturnID
+GROUP BY b.SOPOrderReturnID
+UNION ALL
+SELECT 'OLIVER HARVEY', b.SOPOrderReturnID, MIN(lpo.DocumentNo), COUNT(*)
+FROM   OliverHarveyLive.dbo.MMS123BackToBackPO b
+JOIN   OliverHarveyLive.dbo.POPOrderReturn lpo ON lpo.POPOrderReturnID = b.POPOrderReturnID
+GROUP BY b.SOPOrderReturnID;
+
+INSERT INTO @b2bpo (Company, POPOrderReturnID, FirstDoc, N)
+SELECT 'TIBARD', b.POPOrderReturnID, MIN(lso.DocumentNo), COUNT(*)
+FROM   S200_LIVE.dbo.MMS123BackToBackPO b
+JOIN   S200_LIVE.dbo.SOPOrderReturn lso ON lso.SOPOrderReturnID = b.SOPOrderReturnID
+GROUP BY b.POPOrderReturnID
+UNION ALL
+SELECT 'OLIVER HARVEY', b.POPOrderReturnID, MIN(lso.DocumentNo), COUNT(*)
+FROM   OliverHarveyLive.dbo.MMS123BackToBackPO b
+JOIN   OliverHarveyLive.dbo.SOPOrderReturn lso ON lso.SOPOrderReturnID = b.SOPOrderReturnID
+GROUP BY b.POPOrderReturnID;
+
+/* ------------------------------------------------------------------------
+   2. SO rows: every product line on a live or held sales order, both
+   companies, despatched lines too (Qty3 = 0) so the tracker shows the whole
+   order. Tabs and line breaks stripped - the app splits on TAB.
+   ------------------------------------------------------------------------ */
+INSERT INTO @so (Company, RowKey, ProductCode, Description, DocNo, LineSeq, AccountNo, AccountName,
+                 Reference, DateISO, Qty1, Qty2, Qty3, Qty4, FulfilMethodID, LinkID, B2BCount,
+                 Intercompany, DocStatusID, OrderDate, EnteredBy)
 /* ---------------------------------------------------------------- TIBARD -- */
 SELECT
-    'TIBARD'                                                    AS Company,
-    'TIB-SO-' + CAST(sorl.SOPOrderReturnLineID AS varchar(20))  AS RowKey,
-    LTRIM(RTRIM(sorl.ItemCode))                                 AS ProductCode,
-    /* Tabs and line breaks stripped everywhere - the app splits pasted rows on TAB. */
-    LTRIM(RTRIM(REPLACE(REPLACE(REPLACE(ISNULL(sorl.ItemDescription,''),
-        CHAR(9),' '), CHAR(13),' '), CHAR(10),' ')))            AS Description,
-    sor.DocumentNo                                              AS DocNo,
-    sorl.PrintSequenceNumber                                    AS LineSeq,
-    ISNULL(cust.CustomerAccountNumber,'')                       AS AccountNo,
-    LTRIM(RTRIM(REPLACE(REPLACE(REPLACE(ISNULL(cust.CustomerAccountName,''),
-        CHAR(9),' '), CHAR(13),' '), CHAR(10),' ')))            AS AccountName,
-    LTRIM(RTRIM(REPLACE(REPLACE(REPLACE(ISNULL(sor.CustomerDocumentNo,''),
-        CHAR(9),' '), CHAR(13),' '), CHAR(10),' ')))            AS Reference,
-    /* Header before line - see PROMISED DATE above. Text yyyy-mm-dd so the
-       browser never has to guess dd/mm against mm/dd. */
-    CONVERT(varchar(10), COALESCE(sor.PromisedDeliveryDate,  sorl.PromisedDeliveryDate,
-                                  sor.RequestedDeliveryDate, sorl.RequestedDeliveryDate), 23)
-                                                                AS DateISO,
-    CAST(sorl.StockUnitLineQuantity AS decimal(18,2))           AS Qty1,
-    CAST(ISNULL(sorl.StockUnitDespRcptQuantity,0) AS decimal(18,2))
-                                                                AS Qty2,
-    CAST(sorl.StockUnitLineQuantity - ISNULL(sorl.StockUnitDespRcptQuantity,0) AS decimal(18,2))
-                                                                AS Qty3,
-    CAST(ISNULL(sorl.StockUnitAllocatedQuantity,0) AS decimal(18,2))
-                                                                AS Qty4,
-    ISNULL(CAST(sorl.SOPOrderFulfilmentMethodID AS varchar(10)),'')
-                                                                AS FulfilMethodID,
-    /* Back to back: the PO(s) Sage generated from this order, via
-       MMS123BackToBackPO. Q = first linked PO number, R = how many. Blank Q
-       on a code the buyer normally orders back to back (STK column R > 0) is
-       the miss this app exists to catch. */
-    ISNULL((SELECT TOP 1 lpo.DocumentNo
-            FROM  S200_LIVE.dbo.MMS123BackToBackPO b
-            JOIN  S200_LIVE.dbo.POPOrderReturn lpo ON lpo.POPOrderReturnID = b.POPOrderReturnID
-            WHERE b.SOPOrderReturnID = sor.SOPOrderReturnID
-            ORDER BY lpo.DocumentNo),'')                        AS LinkID,
-    CAST((SELECT COUNT(*) FROM S200_LIVE.dbo.MMS123BackToBackPO b
-          WHERE b.SOPOrderReturnID = sor.SOPOrderReturnID) AS varchar(10))
-                                                                AS B2BCount,
-    /* Matched on ACCOUNT NUMBER, never name - same reason as special makes. */
-    CASE WHEN cust.CustomerAccountNumber = 'OLIVER' THEN 'Y' ELSE '' END
-                                                                AS Intercompany,
-    CAST(sor.DocumentStatusID AS varchar(10))                   AS DocStatusID,
-    /* Date the order was raised in Sage - see ORDER DATE above. */
-    ISNULL(CONVERT(varchar(10), sor.DocumentDate, 23),'')       AS OrderDate,
-    /* Sage user who raised the order - see ENTERED BY above. */
-    LTRIM(RTRIM(REPLACE(REPLACE(REPLACE(ISNULL(sor.DocumentCreatedBy,''),
-        CHAR(9),' '), CHAR(13),' '), CHAR(10),' ')))            AS EnteredBy
-FROM        S200_LIVE.dbo.SOPOrderReturn      sor
-INNER JOIN  S200_LIVE.dbo.SOPOrderReturnLine  sorl ON sorl.SOPOrderReturnID    = sor.SOPOrderReturnID
-LEFT  JOIN  S200_LIVE.dbo.SLCustomerAccount   cust ON cust.SLCustomerAccountID = sor.CustomerID
-WHERE
-        sor.DocumentTypeID   = 0                  -- sales orders, not returns
-    AND sor.DocumentStatusID IN (0,1)             -- live and on hold
-    AND sorl.LineTypeID      = 0                  -- product lines only; no free text, no comments
-    /* Every product line, despatched ones too (Qty3 = 0): the tracker shows
-       the whole order. POtracker ignored this, so the paste suits both. */
-
-UNION ALL
-
-/* -------------------------------------------------------- OLIVER HARVEY -- */
-SELECT
-    'OLIVER HARVEY',
-    'OH-SO-' + CAST(sorl.SOPOrderReturnLineID AS varchar(20)),
-    LTRIM(RTRIM(sorl.ItemCode)),
-    LTRIM(RTRIM(REPLACE(REPLACE(REPLACE(ISNULL(sorl.ItemDescription,''),
-        CHAR(9),' '), CHAR(13),' '), CHAR(10),' '))),
+    'TIBARD',
+    'TIB-SO-' + CAST(sorl.SOPOrderReturnLineID AS varchar(20)),
+    ISNULL(LTRIM(RTRIM(sorl.ItemCode)),''),
+    LTRIM(RTRIM(REPLACE(REPLACE(REPLACE(ISNULL(sorl.ItemDescription,''), CHAR(9),' '), CHAR(13),' '), CHAR(10),' '))),
     sor.DocumentNo,
     sorl.PrintSequenceNumber,
     ISNULL(cust.CustomerAccountNumber,''),
-    LTRIM(RTRIM(REPLACE(REPLACE(REPLACE(ISNULL(cust.CustomerAccountName,''),
-        CHAR(9),' '), CHAR(13),' '), CHAR(10),' '))),
-    LTRIM(RTRIM(REPLACE(REPLACE(REPLACE(ISNULL(sor.CustomerDocumentNo,''),
-        CHAR(9),' '), CHAR(13),' '), CHAR(10),' '))),
+    LTRIM(RTRIM(REPLACE(REPLACE(REPLACE(ISNULL(cust.CustomerAccountName,''), CHAR(9),' '), CHAR(13),' '), CHAR(10),' '))),
+    LTRIM(RTRIM(REPLACE(REPLACE(REPLACE(ISNULL(sor.CustomerDocumentNo,''), CHAR(9),' '), CHAR(13),' '), CHAR(10),' '))),
+    /* Promised date: order header first (amending the date in Sage changes
+       the header only), then the line, then requested. yyyy-mm-dd text. */
     CONVERT(varchar(10), COALESCE(sor.PromisedDeliveryDate,  sorl.PromisedDeliveryDate,
                                   sor.RequestedDeliveryDate, sorl.RequestedDeliveryDate), 23),
     CAST(sorl.StockUnitLineQuantity AS decimal(18,2)),
@@ -178,77 +220,98 @@ SELECT
     CAST(sorl.StockUnitLineQuantity - ISNULL(sorl.StockUnitDespRcptQuantity,0) AS decimal(18,2)),
     CAST(ISNULL(sorl.StockUnitAllocatedQuantity,0) AS decimal(18,2)),
     ISNULL(CAST(sorl.SOPOrderFulfilmentMethodID AS varchar(10)),''),
-    ISNULL((SELECT TOP 1 lpo.DocumentNo
-            FROM  OliverHarveyLive.dbo.MMS123BackToBackPO b
-            JOIN  OliverHarveyLive.dbo.POPOrderReturn lpo ON lpo.POPOrderReturnID = b.POPOrderReturnID
-            WHERE b.SOPOrderReturnID = sor.SOPOrderReturnID
-            ORDER BY lpo.DocumentNo),''),
-    CAST((SELECT COUNT(*) FROM OliverHarveyLive.dbo.MMS123BackToBackPO b
-          WHERE b.SOPOrderReturnID = sor.SOPOrderReturnID) AS varchar(10)),
+    ISNULL(bs.FirstDoc,''),
+    CAST(ISNULL(bs.N,0) AS varchar(10)),
+    /* Matched on ACCOUNT NUMBER, never name. */
+    CASE WHEN cust.CustomerAccountNumber = 'OLIVER' THEN 'Y' ELSE '' END,
+    CAST(sor.DocumentStatusID AS varchar(10)),
+    ISNULL(CONVERT(varchar(10), sor.DocumentDate, 23),''),
+    LTRIM(RTRIM(REPLACE(REPLACE(REPLACE(ISNULL(sor.DocumentCreatedBy,''), CHAR(9),' '), CHAR(13),' '), CHAR(10),' ')))
+FROM        S200_LIVE.dbo.SOPOrderReturn      sor
+INNER JOIN  S200_LIVE.dbo.SOPOrderReturnLine  sorl ON sorl.SOPOrderReturnID    = sor.SOPOrderReturnID
+LEFT  JOIN  S200_LIVE.dbo.SLCustomerAccount   cust ON cust.SLCustomerAccountID = sor.CustomerID
+LEFT  JOIN  @b2bso                            bs   ON bs.Company = 'TIBARD' AND bs.SOPOrderReturnID = sor.SOPOrderReturnID
+WHERE
+        sor.DocumentTypeID   = 0                  -- sales orders, not returns
+    AND sor.DocumentStatusID IN (0,1)             -- live and on hold
+    AND sorl.LineTypeID      = 0                  -- product lines only; no free text, no comments
+
+UNION ALL
+
+/* -------------------------------------------------------- OLIVER HARVEY -- */
+SELECT
+    'OLIVER HARVEY',
+    'OH-SO-' + CAST(sorl.SOPOrderReturnLineID AS varchar(20)),
+    ISNULL(LTRIM(RTRIM(sorl.ItemCode)),''),
+    LTRIM(RTRIM(REPLACE(REPLACE(REPLACE(ISNULL(sorl.ItemDescription,''), CHAR(9),' '), CHAR(13),' '), CHAR(10),' '))),
+    sor.DocumentNo,
+    sorl.PrintSequenceNumber,
+    ISNULL(cust.CustomerAccountNumber,''),
+    LTRIM(RTRIM(REPLACE(REPLACE(REPLACE(ISNULL(cust.CustomerAccountName,''), CHAR(9),' '), CHAR(13),' '), CHAR(10),' '))),
+    LTRIM(RTRIM(REPLACE(REPLACE(REPLACE(ISNULL(sor.CustomerDocumentNo,''), CHAR(9),' '), CHAR(13),' '), CHAR(10),' '))),
+    CONVERT(varchar(10), COALESCE(sor.PromisedDeliveryDate,  sorl.PromisedDeliveryDate,
+                                  sor.RequestedDeliveryDate, sorl.RequestedDeliveryDate), 23),
+    CAST(sorl.StockUnitLineQuantity AS decimal(18,2)),
+    CAST(ISNULL(sorl.StockUnitDespRcptQuantity,0) AS decimal(18,2)),
+    CAST(sorl.StockUnitLineQuantity - ISNULL(sorl.StockUnitDespRcptQuantity,0) AS decimal(18,2)),
+    CAST(ISNULL(sorl.StockUnitAllocatedQuantity,0) AS decimal(18,2)),
+    ISNULL(CAST(sorl.SOPOrderFulfilmentMethodID AS varchar(10)),''),
+    ISNULL(bs.FirstDoc,''),
+    CAST(ISNULL(bs.N,0) AS varchar(10)),
     CASE WHEN cust.CustomerAccountNumber = 'TIB003' THEN 'Y' ELSE '' END,
     CAST(sor.DocumentStatusID AS varchar(10)),
     ISNULL(CONVERT(varchar(10), sor.DocumentDate, 23),''),
-    LTRIM(RTRIM(REPLACE(REPLACE(REPLACE(ISNULL(sor.DocumentCreatedBy,''),
-        CHAR(9),' '), CHAR(13),' '), CHAR(10),' ')))
+    LTRIM(RTRIM(REPLACE(REPLACE(REPLACE(ISNULL(sor.DocumentCreatedBy,''), CHAR(9),' '), CHAR(13),' '), CHAR(10),' ')))
 FROM        OliverHarveyLive.dbo.SOPOrderReturn      sor
 INNER JOIN  OliverHarveyLive.dbo.SOPOrderReturnLine  sorl ON sorl.SOPOrderReturnID    = sor.SOPOrderReturnID
 LEFT  JOIN  OliverHarveyLive.dbo.SLCustomerAccount   cust ON cust.SLCustomerAccountID = sor.CustomerID
+LEFT  JOIN  @b2bso                                   bs   ON bs.Company = 'OLIVER HARVEY' AND bs.SOPOrderReturnID = sor.SOPOrderReturnID
 WHERE
         sor.DocumentTypeID   = 0
     AND sor.DocumentStatusID IN (0,1)
     AND sorl.LineTypeID      = 0
-    /* every product line, despatched ones too - see the Tibard block */
-),
+OPTION (RECOMPILE);
 
-po AS (
-
+/* ------------------------------------------------------------------------
+   3. PO rows: live purchase order lines with quantity outstanding. POP lines
+   carry no delivery date of their own - the header's requested date is used;
+   blank when the buyer never entered one (the app shows "no date").
+   ------------------------------------------------------------------------ */
+INSERT INTO @po (Company, RowKey, ProductCode, Description, DocNo, LineSeq, AccountNo, AccountName,
+                 Reference, DateISO, Qty1, Qty2, Qty3, Qty4, FulfilMethodID, LinkID, B2BCount,
+                 Intercompany, DocStatusID, OrderDate, EnteredBy)
 /* ---------------------------------------------------------------- TIBARD -- */
 SELECT
-    'TIBARD'                                                    AS Company,
-    'TIB-PO-' + CAST(porl.POPOrderReturnLineID AS varchar(20))  AS RowKey,
-    LTRIM(RTRIM(porl.ItemCode))                                 AS ProductCode,
-    LTRIM(RTRIM(REPLACE(REPLACE(REPLACE(ISNULL(porl.ItemDescription,''),
-        CHAR(9),' '), CHAR(13),' '), CHAR(10),' ')))            AS Description,
-    por.DocumentNo                                              AS DocNo,
-    porl.PrintSequenceNumber                                    AS LineSeq,
-    ISNULL(supp.SupplierAccountNumber,'')                       AS AccountNo,
-    LTRIM(RTRIM(REPLACE(REPLACE(REPLACE(ISNULL(supp.SupplierAccountName,''),
-        CHAR(9),' '), CHAR(13),' '), CHAR(10),' ')))            AS AccountName,
-    LTRIM(RTRIM(REPLACE(REPLACE(REPLACE(ISNULL(por.SupplierDocumentNo,''),
-        CHAR(9),' '), CHAR(13),' '), CHAR(10),' ')))            AS Reference,
-    /* POP lines carry no delivery date of their own - header only. Blank if
-       the buyer never entered one; the app treats blank as "date unknown". */
-    ISNULL(CONVERT(varchar(10), por.RequestedDeliveryDate, 23),'')
-                                                                AS DateISO,
-    CAST(porl.StockUnitLineQuantity AS decimal(18,2))           AS Qty1,
-    CAST(ISNULL(porl.StockUnitRcptRtnQuantity,0) AS decimal(18,2))
-                                                                AS Qty2,
-    CAST(porl.StockUnitLineQuantity - ISNULL(porl.StockUnitRcptRtnQuantity,0) AS decimal(18,2))
-                                                                AS Qty3,
-    CAST(NULL AS decimal(18,2))                                 AS Qty4,
-    ''                                                          AS FulfilMethodID,
-    /* The sales order this PO was generated from, via MMS123BackToBackPO. */
-    ISNULL((SELECT TOP 1 lso.DocumentNo
-            FROM  S200_LIVE.dbo.MMS123BackToBackPO b
-            JOIN  S200_LIVE.dbo.SOPOrderReturn lso ON lso.SOPOrderReturnID = b.SOPOrderReturnID
-            WHERE b.POPOrderReturnID = por.POPOrderReturnID
-            ORDER BY lso.DocumentNo),'')                        AS LinkID,
-    CAST((SELECT COUNT(*) FROM S200_LIVE.dbo.MMS123BackToBackPO b
-          WHERE b.POPOrderReturnID = por.POPOrderReturnID) AS varchar(10))
-                                                                AS B2BCount,
+    'TIBARD',
+    'TIB-PO-' + CAST(porl.POPOrderReturnLineID AS varchar(20)),
+    ISNULL(LTRIM(RTRIM(porl.ItemCode)),''),
+    LTRIM(RTRIM(REPLACE(REPLACE(REPLACE(ISNULL(porl.ItemDescription,''), CHAR(9),' '), CHAR(13),' '), CHAR(10),' '))),
+    por.DocumentNo,
+    porl.PrintSequenceNumber,
+    ISNULL(supp.SupplierAccountNumber,''),
+    LTRIM(RTRIM(REPLACE(REPLACE(REPLACE(ISNULL(supp.SupplierAccountName,''), CHAR(9),' '), CHAR(13),' '), CHAR(10),' '))),
+    LTRIM(RTRIM(REPLACE(REPLACE(REPLACE(ISNULL(por.SupplierDocumentNo,''), CHAR(9),' '), CHAR(13),' '), CHAR(10),' '))),
+    ISNULL(CONVERT(varchar(10), por.RequestedDeliveryDate, 23),''),
+    CAST(porl.StockUnitLineQuantity AS decimal(18,2)),
+    CAST(ISNULL(porl.StockUnitRcptRtnQuantity,0) AS decimal(18,2)),
+    CAST(porl.StockUnitLineQuantity - ISNULL(porl.StockUnitRcptRtnQuantity,0) AS decimal(18,2)),
+    NULL,
+    '',
+    ISNULL(bp.FirstDoc,''),
+    CAST(ISNULL(bp.N,0) AS varchar(10)),
     /* Tibard does not currently buy from OH. If it ever does, add that
        supplier account number here the same way as TIB001 below. */
-    ''                                                          AS Intercompany,
-    CAST(por.DocumentStatusID AS varchar(10))                   AS DocStatusID,
-    ISNULL(CONVERT(varchar(10), por.DocumentDate, 23),'')       AS OrderDate,
-    LTRIM(RTRIM(REPLACE(REPLACE(REPLACE(ISNULL(por.DocumentCreatedBy,''),
-        CHAR(9),' '), CHAR(13),' '), CHAR(10),' ')))            AS EnteredBy
+    '',
+    CAST(por.DocumentStatusID AS varchar(10)),
+    ISNULL(CONVERT(varchar(10), por.DocumentDate, 23),''),
+    LTRIM(RTRIM(REPLACE(REPLACE(REPLACE(ISNULL(por.DocumentCreatedBy,''), CHAR(9),' '), CHAR(13),' '), CHAR(10),' ')))
 FROM        S200_LIVE.dbo.POPOrderReturn      por
 INNER JOIN  S200_LIVE.dbo.POPOrderReturnLine  porl ON porl.POPOrderReturnID    = por.POPOrderReturnID
 LEFT  JOIN  S200_LIVE.dbo.PLSupplierAccount   supp ON supp.PLSupplierAccountID = por.SupplierID
+LEFT  JOIN  @b2bpo                            bp   ON bp.Company = 'TIBARD' AND bp.POPOrderReturnID = por.POPOrderReturnID
 WHERE
         por.DocumentTypeID   = 0                  -- purchase orders, not returns
-    AND por.DocumentStatusID IN (0,1)             -- live and on hold (see STATUS FILTERS)
+    AND por.DocumentStatusID IN (0,1)             -- live and on hold
     AND porl.LineTypeID      = 0                  -- product lines only
     AND (porl.StockUnitLineQuantity - ISNULL(porl.StockUnitRcptRtnQuantity,0)) > 0
 
@@ -258,133 +321,125 @@ UNION ALL
 SELECT
     'OLIVER HARVEY',
     'OH-PO-' + CAST(porl.POPOrderReturnLineID AS varchar(20)),
-    LTRIM(RTRIM(porl.ItemCode)),
-    LTRIM(RTRIM(REPLACE(REPLACE(REPLACE(ISNULL(porl.ItemDescription,''),
-        CHAR(9),' '), CHAR(13),' '), CHAR(10),' '))),
+    ISNULL(LTRIM(RTRIM(porl.ItemCode)),''),
+    LTRIM(RTRIM(REPLACE(REPLACE(REPLACE(ISNULL(porl.ItemDescription,''), CHAR(9),' '), CHAR(13),' '), CHAR(10),' '))),
     por.DocumentNo,
     porl.PrintSequenceNumber,
     ISNULL(supp.SupplierAccountNumber,''),
-    LTRIM(RTRIM(REPLACE(REPLACE(REPLACE(ISNULL(supp.SupplierAccountName,''),
-        CHAR(9),' '), CHAR(13),' '), CHAR(10),' '))),
-    LTRIM(RTRIM(REPLACE(REPLACE(REPLACE(ISNULL(por.SupplierDocumentNo,''),
-        CHAR(9),' '), CHAR(13),' '), CHAR(10),' '))),
+    LTRIM(RTRIM(REPLACE(REPLACE(REPLACE(ISNULL(supp.SupplierAccountName,''), CHAR(9),' '), CHAR(13),' '), CHAR(10),' '))),
+    LTRIM(RTRIM(REPLACE(REPLACE(REPLACE(ISNULL(por.SupplierDocumentNo,''), CHAR(9),' '), CHAR(13),' '), CHAR(10),' '))),
     ISNULL(CONVERT(varchar(10), por.RequestedDeliveryDate, 23),''),
     CAST(porl.StockUnitLineQuantity AS decimal(18,2)),
     CAST(ISNULL(porl.StockUnitRcptRtnQuantity,0) AS decimal(18,2)),
     CAST(porl.StockUnitLineQuantity - ISNULL(porl.StockUnitRcptRtnQuantity,0) AS decimal(18,2)),
-    CAST(NULL AS decimal(18,2)),
+    NULL,
     '',
-    ISNULL((SELECT TOP 1 lso.DocumentNo
-            FROM  OliverHarveyLive.dbo.MMS123BackToBackPO b
-            JOIN  OliverHarveyLive.dbo.SOPOrderReturn lso ON lso.SOPOrderReturnID = b.SOPOrderReturnID
-            WHERE b.POPOrderReturnID = por.POPOrderReturnID
-            ORDER BY lso.DocumentNo),''),
-    CAST((SELECT COUNT(*) FROM OliverHarveyLive.dbo.MMS123BackToBackPO b
-          WHERE b.POPOrderReturnID = por.POPOrderReturnID) AS varchar(10)),
+    ISNULL(bp.FirstDoc,''),
+    CAST(ISNULL(bp.N,0) AS varchar(10)),
     /* OH buying from Tibard. TIB001 = "Tibard Ltd" in OH's purchase ledger. */
     CASE WHEN supp.SupplierAccountNumber = 'TIB001' THEN 'Y' ELSE '' END,
     CAST(por.DocumentStatusID AS varchar(10)),
     ISNULL(CONVERT(varchar(10), por.DocumentDate, 23),''),
-    LTRIM(RTRIM(REPLACE(REPLACE(REPLACE(ISNULL(por.DocumentCreatedBy,''),
-        CHAR(9),' '), CHAR(13),' '), CHAR(10),' ')))
+    LTRIM(RTRIM(REPLACE(REPLACE(REPLACE(ISNULL(por.DocumentCreatedBy,''), CHAR(9),' '), CHAR(13),' '), CHAR(10),' ')))
 FROM        OliverHarveyLive.dbo.POPOrderReturn      por
 INNER JOIN  OliverHarveyLive.dbo.POPOrderReturnLine  porl ON porl.POPOrderReturnID    = por.POPOrderReturnID
 LEFT  JOIN  OliverHarveyLive.dbo.PLSupplierAccount   supp ON supp.PLSupplierAccountID = por.SupplierID
+LEFT  JOIN  @b2bpo                                   bp   ON bp.Company = 'OLIVER HARVEY' AND bp.POPOrderReturnID = por.POPOrderReturnID
 WHERE
         por.DocumentTypeID   = 0
     AND por.DocumentStatusID IN (0,1)
     AND porl.LineTypeID      = 0
     AND (porl.StockUnitLineQuantity - ISNULL(porl.StockUnitRcptRtnQuantity,0)) > 0
-),
+OPTION (RECOMPILE);
 
-/* Which codes get a STK row. The stock file is far too big to send whole, so:
+/* ------------------------------------------------------------------------
+   4. Which codes get a STK row. The stock file is far too big to send whole:
    every code on a live SO or PO line, in BOTH companies (an OH order for a
    Tibard-made garment is covered from Tibard's shelf, so the tracker needs
    the Tibard stock figure even when no Tibard order carries the code), plus
    the BULK item for each code (container stock sits under BULKCJ0193MM01,
    not CJ0193MM01). A company only gets the row when it has the stock record
    or the code is on one of its own orders, so there are no empty rows for
-   codes a company never trades. POtracker's query lists only the codes on
-   that company's own orders - that is the one difference in the STK rows. */
-codes0 AS (
-    SELECT Company, ProductCode FROM so
-    UNION
-    SELECT Company, ProductCode FROM po
-),
-anycode AS (
-    SELECT ProductCode FROM codes0
-    UNION
-    SELECT 'BULK' + ProductCode FROM codes0 WHERE ProductCode NOT LIKE 'BULK%'
-),
-codes AS (
-    SELECT 'TIBARD' AS Company, a.ProductCode
-    FROM   anycode a
-    WHERE  EXISTS (SELECT 1 FROM codes0 c WHERE c.Company = 'TIBARD' AND c.ProductCode = a.ProductCode)
-       OR  EXISTS (SELECT 1 FROM S200_LIVE.dbo.StockItem si WHERE si.Code = a.ProductCode)
-    UNION ALL
-    SELECT 'OLIVER HARVEY', a.ProductCode
-    FROM   anycode a
-    WHERE  EXISTS (SELECT 1 FROM codes0 c WHERE c.Company = 'OLIVER HARVEY' AND c.ProductCode = a.ProductCode)
-       OR  EXISTS (SELECT 1 FROM OliverHarveyLive.dbo.StockItem si WHERE si.Code = a.ProductCode)
-),
+   codes a company never trades.
+   ------------------------------------------------------------------------ */
+INSERT INTO @codes0 (Company, ProductCode)
+SELECT Company, ProductCode FROM @so
+UNION
+SELECT Company, ProductCode FROM @po;
 
-/* Back-to-back history per code: how many generated POs in the last 12
-   months contained it. Any value > 0 marks a code the buyer normally orders
-   back to back, so an SO line for it with no linked PO is a miss. */
-b2b12 AS (
-    SELECT 'TIBARD' AS Company, LTRIM(RTRIM(lpl.ItemCode)) AS ProductCode,
-           COUNT(DISTINCT b.POPOrderReturnID) AS N
-    FROM   S200_LIVE.dbo.MMS123BackToBackPO  b
-    JOIN   S200_LIVE.dbo.POPOrderReturn      lpo ON lpo.POPOrderReturnID = b.POPOrderReturnID
-    JOIN   S200_LIVE.dbo.POPOrderReturnLine  lpl ON lpl.POPOrderReturnID = lpo.POPOrderReturnID
-    WHERE  lpo.DocumentDate >= DATEADD(month, -12, GETDATE())
-    GROUP BY LTRIM(RTRIM(lpl.ItemCode))
-    UNION ALL
-    SELECT 'OLIVER HARVEY', LTRIM(RTRIM(lpl.ItemCode)), COUNT(DISTINCT b.POPOrderReturnID)
-    FROM   OliverHarveyLive.dbo.MMS123BackToBackPO  b
-    JOIN   OliverHarveyLive.dbo.POPOrderReturn      lpo ON lpo.POPOrderReturnID = b.POPOrderReturnID
-    JOIN   OliverHarveyLive.dbo.POPOrderReturnLine  lpl ON lpl.POPOrderReturnID = lpo.POPOrderReturnID
-    WHERE  lpo.DocumentDate >= DATEADD(month, -12, GETDATE())
-    GROUP BY LTRIM(RTRIM(lpl.ItemCode))
-),
+INSERT INTO @codes (Company, ProductCode)
+SELECT 'TIBARD', a.ProductCode
+FROM  (SELECT ProductCode FROM @codes0
+       UNION
+       SELECT 'BULK' + ProductCode FROM @codes0 WHERE ProductCode NOT LIKE 'BULK%') a
+WHERE  EXISTS (SELECT 1 FROM @codes0 c WHERE c.Company = 'TIBARD' AND c.ProductCode = a.ProductCode)
+   OR  EXISTS (SELECT 1 FROM S200_LIVE.dbo.StockItem si WHERE si.Code = a.ProductCode)
+UNION ALL
+SELECT 'OLIVER HARVEY', a.ProductCode
+FROM  (SELECT ProductCode FROM @codes0
+       UNION
+       SELECT 'BULK' + ProductCode FROM @codes0 WHERE ProductCode NOT LIKE 'BULK%') a
+WHERE  EXISTS (SELECT 1 FROM @codes0 c WHERE c.Company = 'OLIVER HARVEY' AND c.ProductCode = a.ProductCode)
+   OR  EXISTS (SELECT 1 FROM OliverHarveyLive.dbo.StockItem si WHERE si.Code = a.ProductCode)
+OPTION (RECOMPILE);
 
-stk AS (
+/* ------------------------------------------------------------------------
+   5. Back-to-back history per code: generated POs in the last 12 months
+   that contained it. > 0 marks a code normally ordered back to back.
+   ------------------------------------------------------------------------ */
+INSERT INTO @b2b12 (Company, ProductCode, N)
+SELECT 'TIBARD', LTRIM(RTRIM(lpl.ItemCode)), COUNT(DISTINCT b.POPOrderReturnID)
+FROM   S200_LIVE.dbo.MMS123BackToBackPO  b
+JOIN   S200_LIVE.dbo.POPOrderReturn      lpo ON lpo.POPOrderReturnID = b.POPOrderReturnID
+JOIN   S200_LIVE.dbo.POPOrderReturnLine  lpl ON lpl.POPOrderReturnID = lpo.POPOrderReturnID
+WHERE  lpo.DocumentDate >= DATEADD(month, -12, GETDATE())
+  AND  lpl.ItemCode IS NOT NULL
+GROUP BY LTRIM(RTRIM(lpl.ItemCode))
+UNION ALL
+SELECT 'OLIVER HARVEY', LTRIM(RTRIM(lpl.ItemCode)), COUNT(DISTINCT b.POPOrderReturnID)
+FROM   OliverHarveyLive.dbo.MMS123BackToBackPO  b
+JOIN   OliverHarveyLive.dbo.POPOrderReturn      lpo ON lpo.POPOrderReturnID = b.POPOrderReturnID
+JOIN   OliverHarveyLive.dbo.POPOrderReturnLine  lpl ON lpl.POPOrderReturnID = lpo.POPOrderReturnID
+WHERE  lpo.DocumentDate >= DATEADD(month, -12, GETDATE())
+  AND  lpl.ItemCode IS NOT NULL
+GROUP BY LTRIM(RTRIM(lpl.ItemCode));
 
+/* ------------------------------------------------------------------------
+   6. STK rows: the stock record, figures and classification per code per
+   company. Stock figures sum every warehouse the item sits in.
+   ------------------------------------------------------------------------ */
+INSERT INTO @stk (Company, RowKey, ProductCode, Description, AccountNo, AccountName, Reference,
+                  Qty1, Qty2, Qty3, Qty4, FulfilMethodID, Manufacturer, StockHeld, WebsiteOH,
+                  ProductGroup, BOMItemTypeID, LeadTime, LeadTimeUnitID, MOQ, B2B12m)
 /* ---------------------------------------------------------------- TIBARD -- */
 SELECT
-    'TIBARD'                                                    AS Company,
-    'TIB-STK-' + c.ProductCode                                  AS RowKey,
+    c.Company,
+    'TIB-STK-' + c.ProductCode,
     c.ProductCode,
     CASE WHEN si.Code IS NULL THEN 'CODE NOT IN STOCK FILE'
-         ELSE LTRIM(RTRIM(REPLACE(REPLACE(REPLACE(ISNULL(si.Name,''),
-              CHAR(9),' '), CHAR(13),' '), CHAR(10),' '))) END  AS Description,
-    ISNULL(ps.SupplierAccountNumber,'')                         AS AccountNo,
-    LTRIM(RTRIM(REPLACE(REPLACE(REPLACE(ISNULL(ps.SupplierAccountName,''),
-        CHAR(9),' '), CHAR(13),' '), CHAR(10),' ')))            AS AccountName,
-    LTRIM(RTRIM(REPLACE(REPLACE(REPLACE(ISNULL(ps.SupplierStockCode,''),
-        CHAR(9),' '), CHAR(13),' '), CHAR(10),' ')))            AS Reference,
-    CAST(ISNULL(wh.InStock,0)          AS decimal(18,2))        AS Qty1,
-    CAST(ISNULL(wh.Allocated,0)        AS decimal(18,2))        AS Qty2,
-    CAST(ISNULL(si.FreeStockQuantity,0) AS decimal(18,2))       AS Qty3,
-    CAST(ISNULL(wh.OnPO,0)             AS decimal(18,2))        AS Qty4,
-    ISNULL(CAST(si.SOPOrderFulfilmentMethodID AS varchar(10)),'')
-                                                                AS FulfilMethodID,
-    LTRIM(RTRIM(ISNULL(si.Manufacturer,'')))                    AS Manufacturer,
+         ELSE LTRIM(RTRIM(REPLACE(REPLACE(REPLACE(ISNULL(si.Name,''), CHAR(9),' '), CHAR(13),' '), CHAR(10),' '))) END,
+    ISNULL(ps.SupplierAccountNumber,''),
+    LTRIM(RTRIM(REPLACE(REPLACE(REPLACE(ISNULL(ps.SupplierAccountName,''), CHAR(9),' '), CHAR(13),' '), CHAR(10),' '))),
+    LTRIM(RTRIM(REPLACE(REPLACE(REPLACE(ISNULL(ps.SupplierStockCode,''), CHAR(9),' '), CHAR(13),' '), CHAR(10),' '))),
+    CAST(ISNULL(wh.InStock,0)           AS decimal(18,2)),
+    CAST(ISNULL(wh.Allocated,0)         AS decimal(18,2)),
+    CAST(ISNULL(si.FreeStockQuantity,0) AS decimal(18,2)),
+    CAST(ISNULL(wh.OnPO,0)              AS decimal(18,2)),
+    ISNULL(CAST(si.SOPOrderFulfilmentMethodID AS varchar(10)),''),
+    LTRIM(RTRIM(ISNULL(si.Manufacturer,''))),
     /* Tibard: Stock Held is its own analysis code. */
-    CASE WHEN ISNULL(si.AnalysisCode3,'') = 'Yes' THEN 'Yes' ELSE '' END
-                                                                AS StockHeld,
-    ''                                                          AS WebsiteOH,
-    ISNULL(pg.Code,'')                                          AS ProductGroup,
-    ISNULL(CAST(si.BOMItemTypeID AS varchar(10)),'')            AS BOMItemTypeID,
-    ISNULL(CAST(ps.LeadTime AS varchar(10)),'')                 AS LeadTime,
-    ISNULL(CAST(ps.LeadTimeUnitID AS varchar(10)),'')           AS LeadTimeUnitID,
-    CAST(ps.MinimumOrderQuantity AS decimal(18,2))              AS MOQ,
-    ISNULL(CAST(bb.N AS varchar(10)),'0')                       AS B2B12m
-FROM        codes c
+    CASE WHEN ISNULL(si.AnalysisCode3,'') = 'Yes' THEN 'Yes' ELSE '' END,
+    '',
+    ISNULL(pg.Code,''),
+    ISNULL(CAST(si.BOMItemTypeID AS varchar(10)),''),
+    ISNULL(CAST(ps.LeadTime AS varchar(10)),''),
+    ISNULL(CAST(ps.LeadTimeUnitID AS varchar(10)),''),
+    CAST(ps.MinimumOrderQuantity AS decimal(18,2)),
+    ISNULL(CAST(bb.N AS varchar(10)),'0')
+FROM        @codes c
 LEFT  JOIN  S200_LIVE.dbo.StockItem     si ON si.Code             = c.ProductCode
-LEFT  JOIN  b2b12                       bb ON bb.Company = 'TIBARD' AND bb.ProductCode = c.ProductCode
+LEFT  JOIN  @b2b12                      bb ON bb.Company = 'TIBARD' AND bb.ProductCode = c.ProductCode
 LEFT  JOIN  S200_LIVE.dbo.ProductGroup  pg ON pg.ProductGroupID   = si.ProductGroupID
-/* Stock across every warehouse the item is set up in. */
 OUTER APPLY (
     SELECT  SUM(wi.ConfirmedQtyInStock)                                 AS InStock,
             SUM(ISNULL(wi.QuantityAllocatedSOP,0) + ISNULL(wi.QuantityAllocatedStock,0)
@@ -408,26 +463,22 @@ UNION ALL
 
 /* -------------------------------------------------------- OLIVER HARVEY -- */
 SELECT
-    'OLIVER HARVEY',
+    c.Company,
     'OH-STK-' + c.ProductCode,
     c.ProductCode,
     CASE WHEN si.Code IS NULL THEN 'CODE NOT IN STOCK FILE'
-         ELSE LTRIM(RTRIM(REPLACE(REPLACE(REPLACE(ISNULL(si.Name,''),
-              CHAR(9),' '), CHAR(13),' '), CHAR(10),' '))) END,
+         ELSE LTRIM(RTRIM(REPLACE(REPLACE(REPLACE(ISNULL(si.Name,''), CHAR(9),' '), CHAR(13),' '), CHAR(10),' '))) END,
     ISNULL(ps.SupplierAccountNumber,''),
-    LTRIM(RTRIM(REPLACE(REPLACE(REPLACE(ISNULL(ps.SupplierAccountName,''),
-        CHAR(9),' '), CHAR(13),' '), CHAR(10),' '))),
-    LTRIM(RTRIM(REPLACE(REPLACE(REPLACE(ISNULL(ps.SupplierStockCode,''),
-        CHAR(9),' '), CHAR(13),' '), CHAR(10),' '))),
-    CAST(ISNULL(wh.InStock,0)          AS decimal(18,2)),
-    CAST(ISNULL(wh.Allocated,0)        AS decimal(18,2)),
+    LTRIM(RTRIM(REPLACE(REPLACE(REPLACE(ISNULL(ps.SupplierAccountName,''), CHAR(9),' '), CHAR(13),' '), CHAR(10),' '))),
+    LTRIM(RTRIM(REPLACE(REPLACE(REPLACE(ISNULL(ps.SupplierStockCode,''), CHAR(9),' '), CHAR(13),' '), CHAR(10),' '))),
+    CAST(ISNULL(wh.InStock,0)           AS decimal(18,2)),
+    CAST(ISNULL(wh.Allocated,0)         AS decimal(18,2)),
     CAST(ISNULL(si.FreeStockQuantity,0) AS decimal(18,2)),
-    CAST(ISNULL(wh.OnPO,0)             AS decimal(18,2)),
+    CAST(ISNULL(wh.OnPO,0)              AS decimal(18,2)),
     ISNULL(CAST(si.SOPOrderFulfilmentMethodID AS varchar(10)),''),
     LTRIM(RTRIM(ISNULL(si.Manufacturer,''))),
     /* OH: Stock Held OR Website OR stock held at Tibard under the same code.
-       Same three-way rule as the special makes query - do not tidy it to
-       match the Tibard block, the two companies use the codes differently. */
+       Same three-way rule as the special makes query. */
     CASE WHEN ISNULL(si.AnalysisCode3,'')  = 'Yes'
            OR ISNULL(si.AnalysisCode7,'')  = 'Yes'
            OR ISNULL(tsi.AnalysisCode3,'') = 'Yes' THEN 'Yes' ELSE '' END,
@@ -438,9 +489,9 @@ SELECT
     ISNULL(CAST(ps.LeadTimeUnitID AS varchar(10)),''),
     CAST(ps.MinimumOrderQuantity AS decimal(18,2)),
     ISNULL(CAST(bb.N AS varchar(10)),'0')
-FROM        codes c
+FROM        @codes c
 LEFT  JOIN  OliverHarveyLive.dbo.StockItem     si  ON si.Code            = c.ProductCode
-LEFT  JOIN  b2b12                              bb  ON bb.Company = 'OLIVER HARVEY' AND bb.ProductCode = c.ProductCode
+LEFT  JOIN  @b2b12                             bb  ON bb.Company = 'OLIVER HARVEY' AND bb.ProductCode = c.ProductCode
 LEFT  JOIN  S200_LIVE.dbo.StockItem            tsi ON tsi.Code           = c.ProductCode   -- Tibard's record, same code
 LEFT  JOIN  OliverHarveyLive.dbo.ProductGroup  pg  ON pg.ProductGroupID  = si.ProductGroupID
 OUTER APPLY (
@@ -460,38 +511,39 @@ OUTER APPLY (
     ORDER BY sis.Preferred DESC, sis.DateLastOrder DESC
 ) ps
 WHERE c.Company = 'OLIVER HARVEY'
-),
+OPTION (RECOMPILE);
 
-/* One shape for all three row types. Columns the row type does not use are
-   blank (text) or NULL (numbers) - both arrive as an empty cell when pasted. */
-allrows AS (
+/* ------------------------------------------------------------------------
+   7. One shape for all three row types - THE RESULT. Columns a row type does
+   not use are blank (text) or NULL (numbers); both paste as an empty cell.
+   ------------------------------------------------------------------------ */
+SELECT  RowType, Company, RowKey, ProductCode, Description, DocNo, LineSeq,
+        AccountNo, AccountName, Reference, DateISO, Qty1, Qty2, Qty3, Qty4,
+        FulfilMethodID, LinkID, B2BCount, Intercompany,
+        Manufacturer, StockHeld, WebsiteOH, ProductGroup,
+        BOMItemTypeID, LeadTime, LeadTimeUnitID, MOQ, DocStatusID, OrderDate, EnteredBy
+FROM (
     SELECT 'SO' AS RowType, Company, RowKey, ProductCode, Description, DocNo, LineSeq,
            AccountNo, AccountName, Reference, DateISO, Qty1, Qty2, Qty3, Qty4,
            FulfilMethodID, LinkID, B2BCount, Intercompany,
            '' AS Manufacturer, '' AS StockHeld, '' AS WebsiteOH, '' AS ProductGroup,
            '' AS BOMItemTypeID, '' AS LeadTime, '' AS LeadTimeUnitID,
            CAST(NULL AS decimal(18,2)) AS MOQ, DocStatusID, OrderDate, EnteredBy
-    FROM   so
+    FROM   @so
     UNION ALL
     SELECT 'PO', Company, RowKey, ProductCode, Description, DocNo, LineSeq,
            AccountNo, AccountName, Reference, DateISO, Qty1, Qty2, Qty3, Qty4,
            FulfilMethodID, LinkID, B2BCount, Intercompany,
            '', '', '', '', '', '', '', CAST(NULL AS decimal(18,2)), DocStatusID, OrderDate, EnteredBy
-    FROM   po
+    FROM   @po
     UNION ALL
-    SELECT 'STK', Company, RowKey, ProductCode, Description, '' AS DocNo, CAST(NULL AS smallint) AS LineSeq,
+    SELECT 'STK', Company, RowKey, ProductCode, Description, '' AS DocNo, CAST(NULL AS int) AS LineSeq,
            AccountNo, AccountName, Reference, '' AS DateISO, Qty1, Qty2, Qty3, Qty4,
            FulfilMethodID, '' AS LinkID, B2B12m AS B2BCount, '' AS Intercompany,
            Manufacturer, StockHeld, WebsiteOH, ProductGroup,
            BOMItemTypeID, LeadTime, LeadTimeUnitID, MOQ, '' AS DocStatusID, '' AS OrderDate, '' AS EnteredBy
-    FROM   stk
-)
-
-SELECT  RowType, Company, RowKey, ProductCode, Description, DocNo, LineSeq,
-        AccountNo, AccountName, Reference, DateISO, Qty1, Qty2, Qty3, Qty4,
-        FulfilMethodID, LinkID, B2BCount, Intercompany,
-        Manufacturer, StockHeld, WebsiteOH, ProductGroup,
-        BOMItemTypeID, LeadTime, LeadTimeUnitID, MOQ, DocStatusID, OrderDate, EnteredBy
-FROM    allrows
+    FROM   @stk
+) allrows
 ORDER BY CASE RowType WHEN 'SO' THEN 1 WHEN 'PO' THEN 2 ELSE 3 END,
-         Company, ProductCode, DocNo, LineSeq;
+         Company, ProductCode, DocNo, LineSeq
+OPTION (RECOMPILE);
