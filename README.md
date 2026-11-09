@@ -62,6 +62,9 @@ orders, containers) and nothing else.
 
 ## Changelog
 
+- v1.7 (9 Nov 2026) – the back arrow now steps back: an order opened from a
+  search list returns to that list, one opened from another tab returns to that
+  tab; with nothing to go back to it clears the search as before.
 - v1.6 (9 Nov 2026) – back arrow (←) beside the Find box, shown once a search
   or order is on screen. It clears the search and returns to the blank Find
   tab, the same as the × in the box. Asked for by the sales office.
