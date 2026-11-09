@@ -657,32 +657,35 @@ function renderHeader(){
 
 // ── Find an order ──
 function renderFind(v){
+  // v1.9: the box and the results are separate – results refresh under the box as you type, so the box itself is never re-rendered mid-keystroke
   const q=UI.find.trim();
-  let h=`<div class="find">${q?'<button class="btn btn-line back" onclick="goBack()" title="Back" aria-label="Back">&#8592;</button>':''}<input type="search" id="findQ" value="${esc(UI.find)}" placeholder="Sales order number – or a customer, their order ref, a product code" autocomplete="off"><button class="btn btn-navy" onclick="doFind()">Find</button></div>
-  <div class="hint">Tibard orders are usually 8xxxxx, Oliver Harvey 1xxxxx. Leading zeros are not needed. Despatched and completed orders are not in the daily feed.</div>`;
-  if(!q){v.innerHTML=h;wireFind();return;}
+  v.innerHTML=`<div class="find"><button class="btn btn-line back" id="findBack" onclick="goBack()" title="Back" aria-label="Back"${q?'':' style="display:none"'}>&#8592;</button><input type="search" id="findQ" value="${esc(UI.find)}" placeholder="Sales order number – or a customer, their order ref, a product code" autocomplete="off"><button class="btn btn-navy" onclick="doFind()">Find</button></div>
+  <div class="hint">Tibard orders are usually 8xxxxx, Oliver Harvey 1xxxxx. Leading zeros are not needed. Despatched and completed orders are not in the daily feed.</div><div id="findRes"></div>`;
+  renderFindResults();wireFind();
+}
+function findResultsHtml(){
+  const q=UI.find.trim();if(!q)return '';
   const qn=q.replace(/^0+/,'');
   const exact=ORDERS.filter(o=>!o.ic&&o.doc===qn);
   let open=null;
   if(UI.open){open=ORD_IDX.get(UI.open)||null;if(open&&open.ic)open=null}
   if(!open&&exact.length===1)open=exact[0];
-  if(open){h+=orderCard(open)}
-  else{
-    const ql=q.toLowerCase();
-    const hits=ORDERS.filter(o=>!o.ic&&(o.doc.includes(qn)||o.hay.includes(ql))).sort((a,b)=>(a.promised||'9999').localeCompare(b.promised||'9999'));
-    const ic=ORDERS.find(o=>o.ic&&o.doc===qn);
-    if(!hits.length)h+=`<div class="card"><div class="empty"><b>No live order matches “${esc(q)}”</b>${ic?'That number is an intercompany order ('+esc(ic.acctName)+'). Search for the customer\'s own order instead.':'It may be despatched or complete (not in the daily feed), on a different company, or not yet raised in Sage. Try the customer name or their order reference.'}</div></div>`;
-    else h+=`<div class="card"><h2>${hits.length} matching order${hits.length>1?'s':''}<span class="r">click one to open it</span></h2>${orderTable(hits.slice(0,100),'find')}</div>`;
-  }
-  v.innerHTML=h;wireFind();
+  if(open)return orderCard(open);
+  const ql=q.toLowerCase();
+  const hits=ORDERS.filter(o=>!o.ic&&(o.doc.includes(qn)||o.hay.includes(ql))).sort((a,b)=>(a.promised||'9999').localeCompare(b.promised||'9999'));
+  const ic=ORDERS.find(o=>o.ic&&o.doc===qn);
+  if(!hits.length)return `<div class="card"><div class="empty"><b>No live order matches “${esc(q)}”</b>${ic?'That number is an intercompany order ('+esc(ic.acctName)+'). Search for the customer\'s own order instead.':'It may be despatched or complete (not in the daily feed), on a different company, or not yet raised in Sage. Try the customer name or their order reference.'}</div></div>`;
+  return `<div class="card"><h2>${hits.length} matching order${hits.length>1?'s':''}<span class="r">${hits.length>100?'first 100 shown – keep typing to narrow it down':'click one to open it'}</span></h2>${orderTable(hits.slice(0,100),'find')}</div>`;
 }
-function wireFind(){const i=document.getElementById('findQ');if(!i)return;i.addEventListener('keydown',e=>{if(e.key==='Enter')doFind()});
-  // clearing the box (backspace or the × in the box) clears the results too – no need to press Find
-  i.addEventListener('input',()=>{if(!i.value.trim()&&UI.find.trim())doFind()});i.addEventListener('search',()=>{if(!i.value.trim())doFind()});
+function renderFindResults(){const r=document.getElementById('findRes');if(!r)return;r.innerHTML=findResultsHtml();const b=document.getElementById('findBack');if(b)b.style.display=UI.find.trim()?'':'none'}
+let FIND_T=null;
+function wireFind(){const i=document.getElementById('findQ');if(!i)return;i.addEventListener('keydown',e=>{if(e.key==='Enter'){clearTimeout(FIND_T);doFind()}});
+  // search as you type (short pause so a fast typist is not re-searched on every key); the × in the box clears straight away
+  i.addEventListener('input',()=>{clearTimeout(FIND_T);FIND_T=setTimeout(liveFind,120)});i.addEventListener('search',()=>{if(!i.value.trim()){clearTimeout(FIND_T);liveFind()}});
   if(!UI.open)i.focus();}
-function doFind(){const i=document.getElementById('findQ');UI.find=i?i.value:'';UI.open=null;UI.openLine={};UI.back=null;
-  // only an order number goes in the address bar (so a link to an order survives a refresh); a text search does not come back after a reload
-  const q=UI.find.trim();history.replaceState(null,'',location.pathname+location.search+(/^\d+$/.test(q)?'#so='+q:''));render()}
+function setFindUrl(){const q=UI.find.trim();history.replaceState(null,'',location.pathname+location.search+(/^\d+$/.test(q)?'#so='+q:''))} // only an order number goes in the address bar (so a link to an order survives a refresh); a text search does not come back after a reload
+function liveFind(){const i=document.getElementById('findQ');if(!i||i.value===UI.find)return;UI.find=i.value;UI.open=null;UI.openLine={};UI.back=null;setFindUrl();renderFindResults()}
+function doFind(){clearTimeout(FIND_T);const i=document.getElementById('findQ');UI.find=i?i.value:'';UI.open=null;UI.openLine={};UI.back=null;setFindUrl();render()}
 // v1.6: back arrow beside the Find box. v1.7: it steps back – an order opened from a search list returns to that list,
 // one opened from another tab returns to that tab; otherwise it clears the search (same as the × in the box)
 function goBack(){const b=UI.back;UI.back=null;UI.open=null;UI.openLine={};

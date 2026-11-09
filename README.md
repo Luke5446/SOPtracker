@@ -62,6 +62,9 @@ orders, containers) and nothing else.
 
 ## Changelog
 
+- v1.9 (9 Nov 2026) – the Find box searches as you type: 874 lists every order
+  containing 874, each further digit narrows the list, and the full number
+  shows just that order. Find / Enter still work; the box keeps the cursor.
 - v1.8 (9 Nov 2026) – two more tiles on Late & at risk: late orders waiting on
   production (a works order, or a special make with no WO yet – Clockwork not
   counted) and late orders waiting on suppliers (a container or supplier PO,
