@@ -128,6 +128,10 @@ tr.det td{background:#f8fafd;padding:10px 14px 14px 30px;cursor:default}
 /* modal */
 .ov{position:fixed;inset:0;background:rgba(20,30,50,.45);display:none;align-items:flex-start;justify-content:center;padding:40px 16px;z-index:50;overflow:auto}
 .ov.show{display:flex}
+.dueBtn{display:none;background:none;border:1px solid var(--line);border-radius:4px;color:var(--navy);cursor:pointer;font-size:11px;padding:0 4px;margin-left:4px;line-height:16px;vertical-align:middle}
+.dueBtn:hover{background:var(--navy);color:#fff}
+body:not(.viewer-mode) .dueBtn{display:inline-block}
+.dueNew{color:#b45309;font-weight:700}
 .md{background:#fff;border-radius:10px;width:100%;max-width:760px;box-shadow:0 12px 40px rgba(20,30,50,.3)}
 .md h3{font-size:16px;color:var(--navy);padding:14px 18px;border-bottom:1px solid var(--line);display:flex;align-items:center}
 .md h3 .x{margin-left:auto;background:none;border:0;font-size:20px;cursor:pointer;color:var(--mut)}
@@ -238,6 +242,26 @@ textarea{width:100%;min-height:150px;font-size:11px;font-family:Consolas,monospa
   </div>
 </div>
 
+<!-- Works order due date modal (v2.0) -->
+<div class="ov" id="dueOv">
+  <div class="md" style="max-width:460px">
+    <h3>Change due date <button class="x" onclick="closeOv('dueOv')" aria-label="Close">×</button></h3>
+    <div class="body">
+      <p id="dueInfo"></p>
+      <div class="set">
+        <label>New due date</label>
+        <div><input type="date" id="dueInp"><div class="h">Kept on this PC and shown here straight away. <b>Publish for team</b> writes it into the production planner's data, so the planner shows the new date too.</div></div>
+      </div>
+    </div>
+    <div class="foot">
+      <button class="btn btn-navy" onclick="saveDueEdit()">Save</button>
+      <button class="btn btn-line" onclick="closeOv('dueOv')">Cancel</button>
+      <button class="btn btn-line" id="dueDrop" onclick="dropDueEdit()" title="Forget this change; the planner's own date comes back">Undo change</button>
+      <span class="msg" id="dueMsg"></span>
+    </div>
+  </div>
+</div>
+
 <script>
 /* ═══════════════════════════════════════════════════════════════════════
    Order tracker — data model  (v1.1, 6 Nov 2026: overdue WO/PO = at risk; proforma/online names from the reference)
@@ -264,8 +288,8 @@ textarea{width:100%;min-height:150px;font-size:11px;font-family:Consolas,monospa
    "Contested": a line only has stock because it is older than another order
    that will go short on the same code.
    ═══════════════════════════════════════════════════════════════════════ */
-const APP_VER='1.5';
-const LS_RAW='ordertracker_raw', LS_TS='ordertracker_ts', LS_SET='ordertracker_settings';
+const APP_VER='2.1';
+const LS_RAW='ordertracker_raw', LS_TS='ordertracker_ts', LS_SET='ordertracker_settings', LS_DUE='ordertracker_wodue';
 const DEF_SET={
   made:['Tibard','Oliver Harvey','Clockwork','Clockwork Clothing','Clockwork Giant Clothing'],
   groups:['54'], holdSO:false, share:true, soon:7
@@ -341,9 +365,10 @@ function fetchPP(){
   fetch(PP_URL+'?t='+Date.now()).then(r=>{if(!r.ok)throw new Error('HTTP '+r.status);return r.json()}).then(s=>{
     const codes=new Set(),rows=new Map();
     (s.rows||[]).forEach(r=>{const c=String(r.code||'').toUpperCase();if(c){codes.add(c);rows.set(c,r)}});
-    const wos=(s.WOs||[]).map((w,i)=>({ref:w.ref||'',due:w.due||'',start:w.start||'',createdAt:w.createdAt||'',i,sm:w.sm||null,embOnly:!!w.embOnly,printed:!!w.printed,
+    const wos=(s.WOs||[]).map((w,i)=>({ref:w.ref||'',due:w.due||'',dueSetAt:w.dueSetAt||'',start:w.start||'',createdAt:w.createdAt||'',i,sm:w.sm||null,embOnly:!!w.embOnly,printed:!!w.printed,
       items:(w.items||[]).map(it=>({code:String(it.code||'').toUpperCase(),qty:num(it.qty)})).filter(it=>it.code&&it.qty>0)}));
     wos.forEach(w=>w.items.forEach(it=>codes.add(it.code)));
+    applyDueEdits(wos);
     const smp=new Map();(s.smPending||[]).forEach(o=>{if(o&&o.key)smp.set(o.key,o)});
     PP={ok:true,err:'',wos,codes,rows,smPending:smp,savedAt:s.savedAt||'',sopAt:(s.sopDemand&&s.sopDemand.pastedAt)||''};
     build();render();
@@ -598,7 +623,7 @@ function srcChip(s,ln){
     case 'alloc':return `<span class="src alloc"><b>${q}</b> allocated in Sage</span>`;
     case 'stock':return `<span class="src stock"><b>${q}</b> in stock${ln&&ln.contested?' &#9888;':''}</span>`;
     case 'mirror':return `<span class="src done">intercompany mirror – see the OH order</span>`;
-    case 'wo':return `<span class="src wo"><b>${q}</b> on ${esc(s.ref)}${s.sm?' (special make)':''}${s.embOnly?' (EMB)':''} <span class="d">· due ${s.due?fd(pd(s.due)):'?'}${s.overdue?' · <b>overdue</b>':''}${s.printed===false?' · not printed':''}</span></span>`;
+    case 'wo':return `<span class="src wo"><b>${q}</b> on ${esc(s.ref)}${s.sm?' (special make)':''}${s.embOnly?' (EMB)':''} <span class="d">· due ${dueTxt(s.ref,s.due)}${s.overdue?' · <b>overdue</b>':''}${s.printed===false?' · not printed':''}</span>${dueBtn(s.ref)}</span>`;
     case 'smpend':return `<span class="src short"><b>${q}</b> special make – no works order yet${s.seen?' <span class="d">(seen '+fd(pd(s.seen))+')</span>':''}</span>`;
     case 'cont':return `<span class="src cont"><b>${q}</b> on ${esc(s.ref)} <span class="d">· lands ${fd(pd(s.date))}, out ${fd(s.when)}</span></span>`;
     case 'po':{const p=s.po.src;const who=p.ic?'Tibard (intercompany)':(p.acctName||p.acct||'supplier');
@@ -652,7 +677,8 @@ function renderHeader(){
   const h=document.getElementById('hdrStatus');
   if(!DATA.so.length){h.innerHTML='No data loaded';return}
   const live=ORDERS.filter(o=>o.status!=='done'&&!o.ic).length;
-  h.innerHTML=`<b>${live}</b> live orders · Sage ${DATA.ts?fdt(DATA.ts):'?'}<br>WOs ${PP.ok?fdt(PP.savedAt):'<span style="color:#fca5a5">not read</span>'} · containers ${SP.ok?fdt(SP.savedAt):'<span style="color:#fca5a5">not read</span>'}`;
+  const nd=Object.keys(DUE).length;
+  h.innerHTML=`<b>${live}</b> live orders · Sage ${DATA.ts?fdt(DATA.ts):'?'}<br>WOs ${PP.ok?fdt(PP.savedAt):'<span style="color:#fca5a5">not read</span>'} · containers ${SP.ok?fdt(SP.savedAt):'<span style="color:#fca5a5">not read</span>'}${nd&&IS_EDITOR?` · <span style="color:#fcd34d">${nd} due date change${nd>1?'s':''} to publish</span>`:''}`;
 }
 
 // ── Find an order ──
@@ -689,12 +715,16 @@ function doFind(){clearTimeout(FIND_T);const i=document.getElementById('findQ');
 // v1.6: back arrow beside the Find box. v1.7: it steps back – an order opened from a search list returns to that list,
 // one opened from another tab returns to that tab; otherwise it clears the search (same as the × in the box)
 function goBack(){const b=UI.back;UI.back=null;UI.open=null;UI.openLine={};
-  if(b&&b.tab!=='find'){UI.find='';UI.tab=b.tab;history.replaceState(null,'',location.pathname+location.search);render();window.scrollTo(0,0);return}
-  UI.find=b?b.find:'';history.replaceState(null,'',location.pathname+location.search);render();window.scrollTo(0,0)}
+  // v2.1: back returns to where the list was scrolled to, not the top of the page
+  if(b&&b.tab!=='find'){UI.find='';UI.tab=b.tab;history.replaceState(null,'',location.pathname+location.search);render();window.scrollTo(0,b.y||0);return}
+  UI.find=b?b.find:'';history.replaceState(null,'',location.pathname+location.search);render();window.scrollTo(0,b?b.y||0:0)}
+// v2.1: an opened order scrolls into view - the card sits under the header, the tabs and the Find box, which on a small
+// screen push it below the fold, so opening one from a long list used to land on the page top with the order out of sight
+function scrollToOrder(){const c=document.querySelector('#findRes .card');window.scrollTo(0,c?Math.max(0,c.getBoundingClientRect().top+window.scrollY-8):0)}
 function openOrder(key){const o=ORD_IDX.get(key);if(!o)return;
   // remember where the order was opened from, so the back arrow can return there
-  const f=UI.find.trim();UI.back=UI.tab!=='find'?{tab:UI.tab}:(f&&f!==o.doc&&!UI.open?{tab:'find',find:UI.find}:UI.back);
-  UI.open=key;UI.find=o.doc;UI.tab='find';UI.openLine={};location.hash='#so='+o.doc+(o.co==='OLIVER HARVEY'?'&co=oh':'');render();window.scrollTo(0,0)}
+  const f=UI.find.trim();UI.back=UI.tab!=='find'?{tab:UI.tab,y:window.scrollY}:(f&&f!==o.doc&&!UI.open?{tab:'find',find:UI.find,y:window.scrollY}:UI.back);
+  UI.open=key;UI.find=o.doc;UI.tab='find';UI.openLine={};location.hash='#so='+o.doc+(o.co==='OLIVER HARVEY'?'&co=oh':'');render();scrollToOrder()}
 function goTab(t){UI.tab=t;render()}
 
 function orderCard(o){
@@ -743,7 +773,7 @@ function lineDetail(ln){
   if(ln.out<=0)return '<div class="det"><span class="sm">Despatched line.</span></div>';
   if(!p)return `<div class="det"><span class="sm">${ln.charge?'Charge line – never holds an order up.':ln.hold?'Order on hold – not in the stock queue.':'No queue for this code.'}</span></div>`;
   let h=`<div class="det"><h4>${esc(ln.base)} · ${ln.made?'made in house':'bought in'} · stock ${fmt(p.stock)}${p.stockBits.length?' ('+esc(p.stockBits.join(', '))+')':''}`;
-  if(p.wos.length)h+=` · works orders: ${p.wos.map(w=>esc(w.w.ref)+' '+fmt(w.w.items.filter(i=>baseCode(i.code)===ln.base).reduce((x,i)=>x+i.qty,0))+' due '+(w.w.due?fd(pd(w.w.due)):'?')).join(', ')}`;
+  if(p.wos.length)h+=` · works orders: ${p.wos.map(w=>esc(w.w.ref)+' '+fmt(w.w.items.filter(i=>baseCode(i.code)===ln.base).reduce((x,i)=>x+i.qty,0))+' due '+dueTxt(w.w.ref,w.w.due)+dueBtn(w.w.ref)).join(', ')}`;
   if(p.conts.length)h+=` · containers: ${p.conts.map(c=>esc(c.c.ref)+' '+fmt(c.c.items.filter(i=>baseCode(i.code)===ln.base).reduce((x,i)=>x+i.qty,0))+' lands '+fd(pd(c.c.date))).join(', ')}`;
   if(p.pos.length)h+=` · POs: ${p.pos.map(x=>'PO '+esc(soNo(x.src.doc))+' '+fmt(x.src.out)+' '+esc(x.src.acctName||'')+' '+(x.date?fd(x.date):'no date')).join(', ')}`;
   h+=`</h4><table><thead><tr><th>Order</th><th>Customer</th><th>Promised</th><th>Ordered</th><th class="num">Qty</th><th>Covered by</th></tr></thead><tbody>`;
@@ -884,6 +914,77 @@ function saveSettings(){
 function clearSaved(){if(!confirm('Forget the data pasted on this PC and reload what was last published?'))return;try{localStorage.removeItem(LS_RAW);localStorage.removeItem(LS_TS)}catch(e){}RAW='';DATA={so:[],po:[],stk:[],ts:null};build();render();closeOv('setOv');fetchShared()}
 function applyMode(){const badge=document.getElementById('modeBadge');if(IS_EDITOR){badge.textContent='EDITOR';badge.style.background='#065f46'}else{badge.textContent='VIEW ONLY';document.body.classList.add('viewer-mode')}}
 
+/* ── works order due dates (v2.0) ──────────────────────────────────────────
+   The sales office can move a works order's due date from here. The change is
+   kept on this PC (LS_DUE: {ref:{due, was, setAt}}) and shown at once; Publish
+   for team then writes it into the production planner's data.json (only the
+   `due` field of that works order, stamped dueSetAt / dueSetBy='ordertracker'),
+   so the planner shows the new date and keeps it across its own publishes.    */
+let DUE=lsGet(LS_DUE,{});if(!DUE||typeof DUE!=='object'||Array.isArray(DUE))DUE={};
+function dueSave(){lsSet(LS_DUE,DUE)}
+function applyDueEdits(wos){
+  const byRef=new Map();wos.forEach(w=>byRef.set(w.ref.toUpperCase(),w));let drop=false;
+  Object.keys(DUE).forEach(ref=>{const e=DUE[ref],w=byRef.get(ref);
+    if(!w||w.due===e.due||(w.dueSetAt||'')>(e.setAt||'')){delete DUE[ref];drop=true;return}   // gone, already in the planner, or the planner moved it since
+    e.was=w.due;w.due=e.due;w.dueEdited=true});
+  if(drop)dueSave();
+}
+function dueTxt(ref,due){const e=DUE[String(ref||'').toUpperCase()];const t=due?fd(pd(due)):'?';return e?`<span class="dueNew" title="Changed here from ${e.was?fd(pd(e.was)):'?'} – not yet published">${t}</span>`:t}
+function dueBtn(ref){return IS_EDITOR&&ref?`<button class="dueBtn" onclick="event.stopPropagation();openDueEdit('${esc(ref)}')" title="Change the due date of ${esc(ref)}">&#9998;</button>`:''}
+let dueRef='';
+function openDueEdit(ref){
+  if(!IS_EDITOR)return;dueRef=String(ref).toUpperCase();
+  const w=PP.wos.find(x=>x.ref.toUpperCase()===dueRef);if(!w){alert(ref+' is not a live works order on the planner.');return}
+  const e=DUE[dueRef];
+  document.getElementById('dueInfo').innerHTML=`<b>${esc(w.ref)}</b>${w.sm?' (special make)':''} · ${w.items.map(i=>fmt(i.qty)+' × '+esc(i.code)).join(', ')}<br>Due now: <b>${e?fd(pd(e.was)):(w.due?fd(pd(w.due)):'?')}</b>${e?` · changed here to <b class="dueNew">${fd(pd(e.due))}</b>, not yet published`:''}`;
+  document.getElementById('dueInp').value=(w.due||'').slice(0,10);
+  document.getElementById('dueDrop').style.display=e?'':'none';document.getElementById('dueMsg').textContent='';
+  document.getElementById('dueOv').classList.add('show');
+}
+function saveDueEdit(){
+  const v=document.getElementById('dueInp').value;if(!/^\d{4}-\d{2}-\d{2}$/.test(v)){document.getElementById('dueMsg').textContent='Choose a date.';return}
+  const w=PP.wos.find(x=>x.ref.toUpperCase()===dueRef);if(!w)return;
+  const was=DUE[dueRef]?DUE[dueRef].was:w.due;
+  if(v===was){delete DUE[dueRef];w.due=was;w.dueEdited=false}else{DUE[dueRef]={due:v,was,setAt:new Date().toISOString()};w.due=v;w.dueEdited=true}
+  dueSave();closeOv('dueOv');build();render();
+}
+function dropDueEdit(){const e=DUE[dueRef];const w=PP.wos.find(x=>x.ref.toUpperCase()===dueRef);if(e&&w){w.due=e.was;w.dueEdited=false}delete DUE[dueRef];dueSave();closeOv('dueOv');build();render()}
+
+// Writing the changes into the planner: the token on this PC must be able to
+// write Luke5446/Tibard-Productionplan. A fine-grained token covering only this
+// repo cannot, so a second token can be kept for the planner (LS_PP_TOKEN);
+// with none, the main token is tried. Neither token is ever shown or logged.
+const PP_REPO='Luke5446/Tibard-Productionplan', PP_API='https://api.github.com/repos/'+PP_REPO+'/contents/data.json', LS_PP_TOKEN='ordertracker_pp_token';
+function ppToken(){try{return localStorage.getItem(LS_PP_TOKEN)||localStorage.getItem(LS_TOKEN)||''}catch(e){return ''}}
+function publishDueEdits(cb){
+  const refs=Object.keys(DUE);if(!refs.length){cb(true,'');return}
+  const tok=ppToken();if(!tok){cb(false,'no token');return}
+  const headers={'Authorization':'Bearer '+tok,'Accept':'application/vnd.github+json'};
+  const fail=e=>cb(false,String(e&&e.message||e));
+  const attempt=n=>{
+    let sha=null;
+    fetch(PP_API+'?t='+Date.now(),{headers,cache:'no-store'})                       // the file's sha (data.json is over 1 MB, so the content is not in this reply)
+      .then(r=>{if(!r.ok)throw new Error('GitHub said '+r.status+(r.status===401?' (token refused)':r.status===403||r.status===404?' (the token on this PC cannot read or write the production planner repo – add a planner token via Set up this PC)':''));return r.json()})
+      .then(j=>{sha=j.sha;return fetch(PP_API+'?t='+Date.now(),{headers:{'Authorization':'Bearer '+tok,'Accept':'application/vnd.github.raw+json'},cache:'no-store'})})
+      .then(r=>{if(!r.ok)throw new Error('GitHub said '+r.status+' reading the planner data');return r.json()})
+      .then(s=>{
+        if(!s||!Array.isArray(s.WOs))throw new Error('the planner data has no works orders');
+        const now=new Date().toISOString(),done=[],skip=[];
+        refs.forEach(ref=>{const e=DUE[ref];const wo=s.WOs.find(w=>String(w.ref||'').trim().toUpperCase()===ref);
+          if(!wo){skip.push(ref+' is no longer a live works order');return}
+          if((wo.dueSetAt||'')>(e.setAt||'')){skip.push(ref+' was moved on the planner after this change');return}
+          if(wo.due!==e.due){wo.due=e.due;wo.dueSetAt=now;wo.dueSetBy='ordertracker'}done.push(ref+' → '+e.due)});
+        if(!done.length){refs.forEach(r=>delete DUE[r]);dueSave();cb(true,skip.join('\n'));return null}
+        const body={message:'Due date'+(done.length>1?'s':'')+' changed from the order tracker: '+done.join(', '),content:pubB64(JSON.stringify(s))};if(sha)body.sha=sha;
+        return fetch(PP_API,{method:'PUT',headers:Object.assign({'Content-Type':'application/json'},headers),body:JSON.stringify(body)})
+          .then(r=>{if((r.status===409||r.status===422)&&n<3){attempt(n+1);return}if(!r.ok)throw new Error('GitHub refused the planner save ('+r.status+')');
+            refs.forEach(r=>delete DUE[r]);dueSave();PP.wos.forEach(w=>{w.dueEdited=false});cb(true,skip.join('\n'))});   // the local copy already carries the new dates; the next page open reads them from the planner
+      })
+      .catch(fail);
+  };
+  attempt(1);
+}
+
 const PUB_REPO='Luke5446/SOPtracker', PUB_API='https://api.github.com/repos/'+PUB_REPO+'/contents/data.json', LS_TOKEN='ordertracker_token';
 function pubToken(){try{return localStorage.getItem(LS_TOKEN)||''}catch(e){return ''}}
 function pubSetup(){
@@ -892,6 +993,9 @@ function pubSetup(){
   const t=prompt('Paste the GitHub publishing token for this PC (fine-grained token with Contents: read and write on '+PUB_REPO+').\n\nLeave empty and press OK to remove the token from this PC.',cur?'(kept)':'');
   if(t===null)return;
   try{if(!t)localStorage.removeItem(LS_TOKEN);else if(t!=='(kept)')localStorage.setItem(LS_TOKEN,t.trim())}catch(e){alert('Could not keep the token in this browser.')}
+  let cur2='';try{cur2=localStorage.getItem(LS_PP_TOKEN)||''}catch(e){}
+  const t2=prompt('Planner token (optional): a token with Contents: read and write on '+PP_REPO+', used when Publish writes a changed works order due date into the production planner.\n\nLeave empty to use the token above for both. Type - to remove a planner token kept on this PC.',cur2?'(kept)':'');
+  if(t2!==null){try{if(t2.trim()==='-')localStorage.removeItem(LS_PP_TOKEN);else if(t2&&t2!=='(kept)')localStorage.setItem(LS_PP_TOKEN,t2.trim())}catch(e){alert('Could not keep the planner token in this browser.')}}
   pubRefreshBtn();
 }
 function pubRefreshBtn(){const b=document.getElementById('pubSetupBtn');if(b)b.innerHTML=pubToken()?'&#9881; Token':'&#9881; Set up this PC';const pb=document.getElementById('pubBtn');if(pb)pb.title=pubToken()?'Puts data.json into the repo; the team sees it within a minute':'Needs a token: click Set up this PC and paste the publishing token';const w=document.getElementById('pubWarn');if(w&&pubToken())w.style.display='none'}
@@ -912,14 +1016,15 @@ function publishTeam(){
   if(!IS_EDITOR){alert('View-only mode.');return}
   if(pubBusy)return;
   const raw=RAW||'';
-  if(!raw||!DATA.so.length){alert('Paste today\'s data first.');return}
+  const nd=Object.keys(DUE).length;
+  if(!raw||!DATA.so.length){if(nd){publishDueOnly();return}alert('Paste today\'s data first.');return}
   const state={app:'ordertracker',ver:APP_VER,raw,ts:DATA.ts||new Date().toISOString(),settings:SET,so:DATA.so.length,po:DATA.po.length,stk:DATA.stk.length,savedAt:new Date().toISOString()};
   const json=JSON.stringify(state),tok=pubToken();
   if(!tok){pubNoToken();return}
   const pb=document.getElementById('pubBtn'),was=pb.innerHTML;
   pubBusy=true;pb.innerHTML='&#8987; Publishing&hellip;';
   const done=(ok,err)=>{pubBusy=false;pb.innerHTML=was;
-    if(ok){pb.innerHTML='&#10003; Published';setTimeout(()=>{pb.innerHTML=was},4000);DATA.pubAt=state.savedAt;render()}
+    if(ok){pb.innerHTML='&#10003; Published';setTimeout(()=>{pb.innerHTML=was},4000);DATA.pubAt=state.savedAt;render();if(Object.keys(DUE).length)publishDueOnly()}
     else publishDownload(json,'GitHub did not take the publish ('+err+').')};
   const headers={'Authorization':'Bearer '+tok,'Accept':'application/vnd.github+json'};
   const attempt=n=>{
@@ -931,6 +1036,15 @@ function publishTeam(){
       .catch(e=>done(false,String(e.message||e)));
   };
   attempt(1);
+}
+// the due date changes on their own (after the data publish, or with nothing pasted)
+function publishDueOnly(){
+  if(pubBusy)return;const n=Object.keys(DUE).length;if(!n)return;
+  if(!ppToken()){pubNoToken();return}
+  const pb=document.getElementById('pubBtn'),was=pb.innerHTML;pubBusy=true;pb.innerHTML='&#8987; Updating planner due date'+(n>1?'s':'')+'&hellip;';
+  publishDueEdits((ok,note)=>{pubBusy=false;pb.innerHTML=was;
+    if(ok){pb.innerHTML='&#10003; Planner updated';setTimeout(()=>{pb.innerHTML=was},4000);if(note)alert('Planner updated.\n\nNot applied:\n'+note);render()}
+    else alert('The due date change'+(n>1?'s were':' was')+' not written to the production planner ('+note+').\n\nThe change is kept on this PC; press Publish for team again once the token is right.')});
 }
 function fetchShared(cb,localTs){
   fetch('data.json?t='+Date.now()).then(r=>{if(!r.ok)throw new Error('no data.json');return r.json()}).then(s=>{

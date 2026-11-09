@@ -54,6 +54,25 @@ Same as POtracker: a fine-grained GitHub token on the publishing PC with
 published with it. A PC that has not pasted today takes the published data when
 it is newer than its own.
 
+### Changing a works order's due date (v2.0)
+
+In `?edit` every works order shown against an order line has a pencil (✎).
+Click it, pick the new date, Save: the tracker shows the new date at once and
+recalculates the order's expected date; the header counts the changes waiting
+to be published. **Publish for team** then writes each change into the
+production planner's `data.json` in `Luke5446/Tibard-Productionplan`: the
+latest file is read from GitHub, only that works order's `due` is changed
+(stamped `dueSetAt` and `dueSetBy: "ordertracker"`), and it is put back. The
+planner picks the new date up when its editor page opens, and again just
+before its own publish, so the change survives. A date the planner moved
+after the tracker's change is kept, and the tracker says so.
+
+The planner repo needs a token that can write it. A fine-grained token made
+for this repo alone cannot, so **Set up this PC** asks for a second, optional
+planner token (Contents: read and write on `Tibard-Productionplan`); left
+empty, the main token is tried. If GitHub refuses, the change stays on this
+PC and Publish can be pressed again once the token is right.
+
 ## Later
 
 Built so the Sage paste can be swapped for a live Sage link when the apps move
@@ -62,6 +81,14 @@ orders, containers) and nothing else.
 
 ## Changelog
 
+- v2.1 (9 Nov 2026) - opening an order from a list scrolls the order card into
+  view (it sat below the header, tabs and Find box, out of sight on a small
+  screen), and the back arrow returns to where the list was scrolled to.
+- v2.0 (9 Nov 2026) – works order due dates can be changed from the editor
+  (pencil beside the works order on an order line). Publish for team writes the
+  change into the production planner's data.json, touching only that works
+  order's due date; an optional second token for the planner repo in Set up
+  this PC.
 - v1.9 (9 Nov 2026) – the Find box searches as you type: 874 lists every order
   containing 874, each further digit narrows the list, and the full number
   shows just that order. Find / Enter still work; the box keeps the cursor.
