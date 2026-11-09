@@ -62,6 +62,10 @@ orders, containers) and nothing else.
 
 ## Changelog
 
+- v1.8 (9 Nov 2026) – two more tiles on Late & at risk: late orders waiting on
+  production (a works order, or a special make with no WO yet – Clockwork not
+  counted) and late orders waiting on suppliers (a container or supplier PO,
+  Clockwork included). An order waiting on both shows in both.
 - v1.7 (9 Nov 2026) – the back arrow now steps back: an order opened from a
   search list returns to that list, one opened from another tab returns to that
   tab; with nothing to go back to it clears the search as before.
