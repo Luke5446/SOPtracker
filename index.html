@@ -288,7 +288,7 @@ textarea{width:100%;min-height:150px;font-size:11px;font-family:Consolas,monospa
    "Contested": a line only has stock because it is older than another order
    that will go short on the same code.
    ═══════════════════════════════════════════════════════════════════════ */
-const APP_VER='2.0';
+const APP_VER='2.1';
 const LS_RAW='ordertracker_raw', LS_TS='ordertracker_ts', LS_SET='ordertracker_settings', LS_DUE='ordertracker_wodue';
 const DEF_SET={
   made:['Tibard','Oliver Harvey','Clockwork','Clockwork Clothing','Clockwork Giant Clothing'],
@@ -715,12 +715,16 @@ function doFind(){clearTimeout(FIND_T);const i=document.getElementById('findQ');
 // v1.6: back arrow beside the Find box. v1.7: it steps back – an order opened from a search list returns to that list,
 // one opened from another tab returns to that tab; otherwise it clears the search (same as the × in the box)
 function goBack(){const b=UI.back;UI.back=null;UI.open=null;UI.openLine={};
-  if(b&&b.tab!=='find'){UI.find='';UI.tab=b.tab;history.replaceState(null,'',location.pathname+location.search);render();window.scrollTo(0,0);return}
-  UI.find=b?b.find:'';history.replaceState(null,'',location.pathname+location.search);render();window.scrollTo(0,0)}
+  // v2.1: back returns to where the list was scrolled to, not the top of the page
+  if(b&&b.tab!=='find'){UI.find='';UI.tab=b.tab;history.replaceState(null,'',location.pathname+location.search);render();window.scrollTo(0,b.y||0);return}
+  UI.find=b?b.find:'';history.replaceState(null,'',location.pathname+location.search);render();window.scrollTo(0,b?b.y||0:0)}
+// v2.1: an opened order scrolls into view - the card sits under the header, the tabs and the Find box, which on a small
+// screen push it below the fold, so opening one from a long list used to land on the page top with the order out of sight
+function scrollToOrder(){const c=document.querySelector('#findRes .card');window.scrollTo(0,c?Math.max(0,c.getBoundingClientRect().top+window.scrollY-8):0)}
 function openOrder(key){const o=ORD_IDX.get(key);if(!o)return;
   // remember where the order was opened from, so the back arrow can return there
-  const f=UI.find.trim();UI.back=UI.tab!=='find'?{tab:UI.tab}:(f&&f!==o.doc&&!UI.open?{tab:'find',find:UI.find}:UI.back);
-  UI.open=key;UI.find=o.doc;UI.tab='find';UI.openLine={};location.hash='#so='+o.doc+(o.co==='OLIVER HARVEY'?'&co=oh':'');render();window.scrollTo(0,0)}
+  const f=UI.find.trim();UI.back=UI.tab!=='find'?{tab:UI.tab,y:window.scrollY}:(f&&f!==o.doc&&!UI.open?{tab:'find',find:UI.find,y:window.scrollY}:UI.back);
+  UI.open=key;UI.find=o.doc;UI.tab='find';UI.openLine={};location.hash='#so='+o.doc+(o.co==='OLIVER HARVEY'?'&co=oh':'');render();scrollToOrder()}
 function goTab(t){UI.tab=t;render()}
 
 function orderCard(o){

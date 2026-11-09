@@ -81,6 +81,9 @@ orders, containers) and nothing else.
 
 ## Changelog
 
+- v2.1 (9 Nov 2026) - opening an order from a list scrolls the order card into
+  view (it sat below the header, tabs and Find box, out of sight on a small
+  screen), and the back arrow returns to where the list was scrolled to.
 - v2.0 (9 Nov 2026) – works order due dates can be changed from the editor
   (pencil beside the works order on an order line). Publish for team writes the
   change into the production planner's data.json, touching only that works
