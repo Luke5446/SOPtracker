@@ -279,7 +279,7 @@ let ORD_IDX=new Map();         // co|doc -> order
 let LINES=[];                  // every SO line
 let POOLS=new Map();           // pool key -> allocation detail
 let JUMPS=[];                  // orders that could be completed by borrowing stock held for a waiting order
-let UI={tab:'find',co:'',q:'',find:'',open:null,openLine:{},sort:{},tile:''};
+let UI={tab:'find',co:'',q:'',find:'',open:null,openLine:{},sort:{},tile:'',back:null};
 const IS_EDITOR=/[?&]edit\b/.test(window.location.search);
 
 function lsGet(k,d){try{const v=localStorage.getItem(k);return v?JSON.parse(v):d}catch(e){return d}}
@@ -653,7 +653,7 @@ function renderHeader(){
 // ── Find an order ──
 function renderFind(v){
   const q=UI.find.trim();
-  let h=`<div class="find">${q?'<button class="btn btn-line back" onclick="goBack()" title="Back to the search box" aria-label="Back">&#8592;</button>':''}<input type="search" id="findQ" value="${esc(UI.find)}" placeholder="Sales order number – or a customer, their order ref, a product code" autocomplete="off"><button class="btn btn-navy" onclick="doFind()">Find</button></div>
+  let h=`<div class="find">${q?'<button class="btn btn-line back" onclick="goBack()" title="Back" aria-label="Back">&#8592;</button>':''}<input type="search" id="findQ" value="${esc(UI.find)}" placeholder="Sales order number – or a customer, their order ref, a product code" autocomplete="off"><button class="btn btn-navy" onclick="doFind()">Find</button></div>
   <div class="hint">Tibard orders are usually 8xxxxx, Oliver Harvey 1xxxxx. Leading zeros are not needed. Despatched and completed orders are not in the daily feed.</div>`;
   if(!q){v.innerHTML=h;wireFind();return;}
   const qn=q.replace(/^0+/,'');
@@ -675,12 +675,18 @@ function wireFind(){const i=document.getElementById('findQ');if(!i)return;i.addE
   // clearing the box (backspace or the × in the box) clears the results too – no need to press Find
   i.addEventListener('input',()=>{if(!i.value.trim()&&UI.find.trim())doFind()});i.addEventListener('search',()=>{if(!i.value.trim())doFind()});
   if(!UI.open)i.focus();}
-function doFind(){const i=document.getElementById('findQ');UI.find=i?i.value:'';UI.open=null;UI.openLine={};
+function doFind(){const i=document.getElementById('findQ');UI.find=i?i.value:'';UI.open=null;UI.openLine={};UI.back=null;
   // only an order number goes in the address bar (so a link to an order survives a refresh); a text search does not come back after a reload
   const q=UI.find.trim();history.replaceState(null,'',location.pathname+location.search+(/^\d+$/.test(q)?'#so='+q:''));render()}
-// v1.6: back arrow beside the Find box – clears the search and returns to the blank Find tab (same as the × in the box)
-function goBack(){UI.find='';UI.open=null;UI.openLine={};history.replaceState(null,'',location.pathname+location.search);render();window.scrollTo(0,0)}
-function openOrder(key){const o=ORD_IDX.get(key);if(!o)return;UI.open=key;UI.find=o.doc;UI.tab='find';UI.openLine={};location.hash='#so='+o.doc+(o.co==='OLIVER HARVEY'?'&co=oh':'');render();window.scrollTo(0,0)}
+// v1.6: back arrow beside the Find box. v1.7: it steps back – an order opened from a search list returns to that list,
+// one opened from another tab returns to that tab; otherwise it clears the search (same as the × in the box)
+function goBack(){const b=UI.back;UI.back=null;UI.open=null;UI.openLine={};
+  if(b&&b.tab!=='find'){UI.find='';UI.tab=b.tab;history.replaceState(null,'',location.pathname+location.search);render();window.scrollTo(0,0);return}
+  UI.find=b?b.find:'';history.replaceState(null,'',location.pathname+location.search);render();window.scrollTo(0,0)}
+function openOrder(key){const o=ORD_IDX.get(key);if(!o)return;
+  // remember where the order was opened from, so the back arrow can return there
+  const f=UI.find.trim();UI.back=UI.tab!=='find'?{tab:UI.tab}:(f&&f!==o.doc&&!UI.open?{tab:'find',find:UI.find}:UI.back);
+  UI.open=key;UI.find=o.doc;UI.tab='find';UI.openLine={};location.hash='#so='+o.doc+(o.co==='OLIVER HARVEY'?'&co=oh':'');render();window.scrollTo(0,0)}
 function goTab(t){UI.tab=t;render()}
 
 function orderCard(o){
