@@ -89,6 +89,8 @@ td .sm,.sm{font-size:11.5px;color:var(--mut)}
 .find input{flex:1 1 280px;font-size:17px;padding:11px 14px;border-radius:8px;border:2px solid var(--steel);font-family:inherit;color:var(--txt)}
 .find input:focus{border-color:var(--gold)}
 .find .btn{padding:11px 18px;font-size:14px}
+.find .back{flex:0 0 auto;padding:9px 14px;font-size:20px;line-height:1;border:2px solid var(--navy)}
+.find .back:hover{background:var(--navy);color:#fff}
 .hint{font-size:12px;color:var(--mut);margin:-6px 0 12px}
 
 /* order card */
@@ -651,7 +653,7 @@ function renderHeader(){
 // ── Find an order ──
 function renderFind(v){
   const q=UI.find.trim();
-  let h=`<div class="find"><input type="search" id="findQ" value="${esc(UI.find)}" placeholder="Sales order number – or a customer, their order ref, a product code" autocomplete="off"><button class="btn btn-navy" onclick="doFind()">Find</button></div>
+  let h=`<div class="find">${q?'<button class="btn btn-line back" onclick="goBack()" title="Back to the search box" aria-label="Back">&#8592;</button>':''}<input type="search" id="findQ" value="${esc(UI.find)}" placeholder="Sales order number – or a customer, their order ref, a product code" autocomplete="off"><button class="btn btn-navy" onclick="doFind()">Find</button></div>
   <div class="hint">Tibard orders are usually 8xxxxx, Oliver Harvey 1xxxxx. Leading zeros are not needed. Despatched and completed orders are not in the daily feed.</div>`;
   if(!q){v.innerHTML=h;wireFind();return;}
   const qn=q.replace(/^0+/,'');
@@ -676,6 +678,8 @@ function wireFind(){const i=document.getElementById('findQ');if(!i)return;i.addE
 function doFind(){const i=document.getElementById('findQ');UI.find=i?i.value:'';UI.open=null;UI.openLine={};
   // only an order number goes in the address bar (so a link to an order survives a refresh); a text search does not come back after a reload
   const q=UI.find.trim();history.replaceState(null,'',location.pathname+location.search+(/^\d+$/.test(q)?'#so='+q:''));render()}
+// v1.6: back arrow beside the Find box – clears the search and returns to the blank Find tab (same as the × in the box)
+function goBack(){UI.find='';UI.open=null;UI.openLine={};history.replaceState(null,'',location.pathname+location.search);render();window.scrollTo(0,0)}
 function openOrder(key){const o=ORD_IDX.get(key);if(!o)return;UI.open=key;UI.find=o.doc;UI.tab='find';UI.openLine={};location.hash='#so='+o.doc+(o.co==='OLIVER HARVEY'?'&co=oh':'');render();window.scrollTo(0,0)}
 function goTab(t){UI.tab=t;render()}
 
