@@ -62,6 +62,9 @@ orders, containers) and nothing else.
 
 ## Changelog
 
+- v1.6 (9 Nov 2026) – back arrow (←) beside the Find box, shown once a search
+  or order is on screen. It clears the search and returns to the blank Find
+  tab, the same as the × in the box. Asked for by the sales office.
 - v1.5 (6 Nov 2026) – clearing the Find box (backspace or its ×) clears the
   results straight away; before, the last search stayed on screen until Find
   was pressed again.
