@@ -522,6 +522,11 @@ function build(){
       else if(s.t==='short')kinds.add(l.made?'made':'bought');
     }));
     o.group=kinds.size===0?'':kinds.size===2?'both':[...kinds][0];
+    // v1.8: what the late tiles split on – production = a works order (or a special make with no WO yet); suppliers = a container or a supplier PO (Clockwork included)
+    const isProd=s=>s.t==='wo'||s.t==='smpend'||(s.t==='po'&&s.via&&s.via.sources.some(x=>x.t==='wo'||x.t==='smpend'));
+    const isSupp=s=>s.t==='cont'||(s.t==='po'&&(!s.via||s.via.sources.some(x=>x.t==='cont'||x.t==='po')));
+    o.waitProd=waiting.some(l=>l.sources.some(isProd));
+    o.waitSupp=waiting.some(l=>l.sources.some(isSupp));
     if(!live.length)o.status='done';
     else if(o.hold&&!SET.holdSO)o.status='hold';
     else if(o.days!=null&&o.days<0)o.status='late';
@@ -771,10 +776,11 @@ function renderRisk(v){
   const late=all.filter(o=>o.status==='late'),risk=all.filter(o=>o.status==='risk');
   const contested=liveOrders().filter(o=>o.contested);
   const special=liveOrders().filter(o=>o.special>0);
-  const tiles=[['late','red',late.length,'late (promised date passed)'],['risk','amber',risk.length,'at risk'],['contested','amber',contested.length,'stock contested'],['soon','steel',liveOrders().filter(o=>o.days!=null&&o.days>=0&&o.days<=SET.soon).length,`due within ${SET.soon} days`],['special','gold',special.length,`special makes (${special.filter(o=>o.specialWait>0).length} still in production)`]];
+  const lateProd=late.filter(o=>o.waitProd),lateSupp=late.filter(o=>o.waitSupp);
+  const tiles=[['late','red',late.length,'late (promised date passed)'],['lateProd','red',lateProd.length,'late – waiting on production'],['lateSupp','red',lateSupp.length,'late – waiting on suppliers (incl. Clockwork)'],['risk','amber',risk.length,'at risk'],['contested','amber',contested.length,'stock contested'],['soon','steel',liveOrders().filter(o=>o.days!=null&&o.days>=0&&o.days<=SET.soon).length,`due within ${SET.soon} days`],['special','gold',special.length,`special makes (${special.filter(o=>o.specialWait>0).length} still in production)`]];
   let h=`<div class="tiles">${tiles.map(t=>`<div class="tile ${t[1]} ${UI.tile===t[0]?'on':''}" onclick="setTile('${t[0]}')"><b>${t[2]}</b><span>${t[3]}</span></div>`).join('')}</div>`;
   let list=all;
-  if(UI.tile==='late')list=late;else if(UI.tile==='risk')list=risk;else if(UI.tile==='contested')list=contested;else if(UI.tile==='soon')list=liveOrders().filter(o=>o.days!=null&&o.days>=0&&o.days<=SET.soon);else if(UI.tile==='special')list=special;
+  if(UI.tile==='late')list=late;else if(UI.tile==='lateProd')list=lateProd;else if(UI.tile==='lateSupp')list=lateSupp;else if(UI.tile==='risk')list=risk;else if(UI.tile==='contested')list=contested;else if(UI.tile==='soon')list=liveOrders().filter(o=>o.days!=null&&o.days>=0&&o.days<=SET.soon);else if(UI.tile==='special')list=special;
   const groups=[['bought','Bought in','Waiting on a supplier PO'],['made','Made in house','Waiting on a works order or a Clockwork container – including codes usually bought from Clockwork that have a works order on'],['both','Waiting on both','Some lines on production, some on a supplier']];
   const none=list.filter(o=>!o.group);
   groups.forEach(g=>{
@@ -782,13 +788,13 @@ function renderRisk(v){
     h+=`<div class="sec"><h3>${g[1]} <span class="n">${rows.length}</span><span class="r">${g[2]} · <a href="javascript:void(0)" onclick="exportCsv('${g[0]}')">Export CSV</a></span></h3><div class="card" style="margin-top:8px">${orderTable(rows,'risk-'+g[0])}</div></div>`;
   });
   if(none.length)h+=`<div class="sec"><h3>${UI.tile==='special'?'Made and booked in':'Nothing waiting – date only'} <span class="n">${none.length}</span><span class="r">${UI.tile==='special'?'the special make is in stock; the order can be picked':'everything outstanding is in stock; the promised date has passed or is contested'}</span></h3><div class="card" style="margin-top:8px">${orderTable(sortBy(none,'risk-none',{k:'days',d:'a'}),'risk-none')}</div></div>`;
-  h+=`<div class="legend"><span><b>Late</b> = promised date (Sage order header) has passed with quantity still to go.</span><span><b>At risk</b> = a line's cover arrives after the promised date, or on an unknown date, or nothing is on order for it.</span><span><b>Contested</b> = the line has stock only because it is older than another live order that will go short.</span><span><b>Overdue</b> = a works order or PO date has passed and it is still not in.</span><span><b>Special make</b> = a made-in-house line whose code is not stock held in Sage (or one the planner lists as a special make).</span><span>Intercompany orders (OLIVER / TIB003) are not listed.</span></div>`;
+  h+=`<div class="legend"><span><b>Late</b> = promised date (Sage order header) has passed with quantity still to go.</span><span><b>At risk</b> = a line's cover arrives after the promised date, or on an unknown date, or nothing is on order for it.</span><span><b>Contested</b> = the line has stock only because it is older than another live order that will go short.</span><span><b>Overdue</b> = a works order or PO date has passed and it is still not in.</span><span><b>Waiting on production</b> = a late order with a line on a works order (or a special make with no WO yet). <b>Waiting on suppliers</b> = a late order with a line on a container or a supplier PO, Clockwork included. An order can be in both.</span><span><b>Special make</b> = a made-in-house line whose code is not stock held in Sage (or one the planner lists as a special make).</span><span>Intercompany orders (OLIVER / TIB003) are not listed.</span></div>`;
   v.innerHTML=h;
 }
 function setTile(t){UI.tile=UI.tile===t?'':t;render()}
 function exportCsv(g){
   const all=riskOrders();
-  let list=all;if(UI.tile==='late')list=all.filter(o=>o.status==='late');else if(UI.tile==='risk')list=all.filter(o=>o.status==='risk');else if(UI.tile==='contested')list=liveOrders().filter(o=>o.contested);else if(UI.tile==='soon')list=liveOrders().filter(o=>o.days!=null&&o.days>=0&&o.days<=SET.soon);else if(UI.tile==='special')list=liveOrders().filter(o=>o.special>0);
+  let list=all;if(UI.tile==='late')list=all.filter(o=>o.status==='late');else if(UI.tile==='lateProd')list=all.filter(o=>o.status==='late'&&o.waitProd);else if(UI.tile==='lateSupp')list=all.filter(o=>o.status==='late'&&o.waitSupp);else if(UI.tile==='risk')list=all.filter(o=>o.status==='risk');else if(UI.tile==='contested')list=liveOrders().filter(o=>o.contested);else if(UI.tile==='soon')list=liveOrders().filter(o=>o.days!=null&&o.days>=0&&o.days<=SET.soon);else if(UI.tile==='special')list=liveOrders().filter(o=>o.special>0);
   const rows=sortBy(list.filter(o=>o.group===g),'risk-'+g,{k:'days',d:'a'});
   const cell=s=>'"'+String(s==null?'':s).replace(/"/g,'""')+'"';
   const lines=[['Status','Company','SO','Customer','Account','Their ref','Ordered','Promised','Days','Lines to go','Qty to go','Waiting on','Expected','Type'].map(cell).join(',')];
