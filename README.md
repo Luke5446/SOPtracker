@@ -81,6 +81,10 @@ orders, containers) and nothing else.
 
 ## Changelog
 
+- v2.3 (10 Nov 2026) – the embroidery list now includes orders with transfers
+  to apply: a transfer line still to go (Sage product group 53 with "transfer"
+  in the name or an ID/TX code; tax tabs left out) or a DTF: / Print: order
+  reference. Transfer lines show with a Transfer pill and their quantity.
 - v2.2 (10 Nov 2026) – an order due today whose goods are still in production
   (on a works order, a special make with no works order yet, or a made-in-house
   code with nothing on order) now counts as late. Two new tiles on Late & at
