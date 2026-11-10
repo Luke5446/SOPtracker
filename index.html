@@ -841,7 +841,8 @@ function prodSummary(o,plain){
 function embSummary(o,plain){
   let parts=o.embLines.map(l=>(l.desc||l.code).replace(/^EMBROIDERY (LOGO|TEXT) (APPLICATION|ORIGINATION) CHARGE[\s-]*/i,'').trim()||(/^TEXT/.test(l.code)?'Text':/ORIGINATION/.test(l.code)?'Logo origination':'Logo'));
   parts=[...new Set(parts)].map(x=>({k:'EMB',x}));
-  o.trLines.forEach(l=>parts.push({k:'Transfer',x:fmt(l.out)+' × '+(l.desc||l.code)}));   // v2.3
+  const tr=new Map();o.trLines.forEach(l=>{const d=(l.desc||l.code).trim();tr.set(d,(tr.get(d)||0)+l.out)});   // v2.3: same transfer on several lines = one row
+  tr.forEach((q,d)=>parts.push({k:'Transfer',x:fmt(q)+' × '+d}));
   if(!parts.length)parts.push({k:'',x:o.embWO?'Embroidery-only works order':'EMB / print order reference – no embroidery or transfer line on the order'});
   if(plain)return parts.map(p=>(p.k==='Transfer'?'Transfer: ':'')+p.x).join(' | ');
   return parts.slice(0,5).map(p=>`<div>${p.k==='Transfer'?'<span class="pill p-blue">Transfer</span> ':''}${esc(p.x)}</div>`).join('')+(parts.length>5?'<div class="sm">+'+(parts.length-5)+' more – open the order</div>':'');
