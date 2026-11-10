@@ -56,7 +56,7 @@ main{max-width:1320px;margin:0 auto;padding:16px 16px 60px}
 .tile span{font-size:11.5px;color:var(--mut)}
 .tile:hover{border-color:var(--steel)}
 .tile.on{border-color:var(--gold);border-width:2px;background:#fdf9ef}
-.tile.red b{color:var(--red)} .tile.amber b{color:var(--amber)} .tile.green b{color:var(--green)} .tile.steel b{color:var(--steel)} .tile.gold b{color:#9a6f12}
+.tile.red b{color:var(--red)} .tile.amber b{color:var(--amber)} .tile.green b{color:var(--green)} .tile.steel b{color:var(--steel)} .tile.gold b{color:#9a6f12} .tile.navy{border-left:4px solid var(--navy)}
 
 .card{background:var(--card);border:1px solid var(--line);border-radius:10px;margin-top:14px;box-shadow:0 1px 3px rgba(20,30,50,.06);overflow:hidden}
 .card h2{font-size:14px;padding:11px 16px;border-bottom:1px solid var(--line);color:var(--navy);display:flex;align-items:center;gap:10px;flex-wrap:wrap}
@@ -288,11 +288,11 @@ textarea{width:100%;min-height:150px;font-size:11px;font-family:Consolas,monospa
    "Contested": a line only has stock because it is older than another order
    that will go short on the same code.
    ═══════════════════════════════════════════════════════════════════════ */
-const APP_VER='2.1';
+const APP_VER='2.3';
 const LS_RAW='ordertracker_raw', LS_TS='ordertracker_ts', LS_SET='ordertracker_settings', LS_DUE='ordertracker_wodue';
 const DEF_SET={
   made:['Tibard','Oliver Harvey','Clockwork','Clockwork Clothing','Clockwork Giant Clothing'],
-  groups:['54'], holdSO:false, share:true, soon:7
+  groups:['54'], holdSO:false, share:true, soon:7, ahead:10
 };
 const CLOCKWORK_ACCTS=['CLO003'];
 let SET=loadSettings();
@@ -390,6 +390,12 @@ function isMadeMfr(m){m=(m||'').trim().toLowerCase();return m!==''&&SET.made.som
 function isCharge(s){return !!s&&SET.groups.includes((s.grp||'').trim())}
 function isClockworkPO(l){return CLOCKWORK_ACCTS.includes(l.acct)||/clockwork/i.test(l.acctName||'')}
 
+// v2.2: an embroidery charge line (Sage stock items "EMBROIDERY LOGO APPLICATION / ORIGINATION / TEXT APPLICATION CHARGE")
+const isEmbCode=c=>/^(LOGO|TEXT)(APPLICATION|ORIGINATION)/.test(c||'');
+// v2.2: what counts as "production" on a line – a works order, a special make with no WO yet (also through the Tibard order
+// an OH order is bought from), or a made-in-house code with nothing on order that is not a Clockwork container code
+const prodSrc=(s,ln)=>s.t==='wo'||s.t==='smpend'||(s.t==='short'&&ln.made&&(PP.codes.has(ln.base)||!SP.codes.has(ln.base)))||(s.t==='po'&&!!s.via&&s.via.sources.some(x=>prodSrc(x,s.via)));
+
 /* ── build the model ───────────────────────────────────────────────────── */
 function build(){
   ORDERS=[];ORD_IDX=new Map();LINES=[];POOLS=new Map();
@@ -423,6 +429,8 @@ function build(){
     ln.made=!ln.charge&&isMade(base);
     ln.freetext=/^FREETEXT/.test(l.code);
     ln.special=ln.made&&!ln.freetext&&!heldAny(base);   // made in house and not a stock-held code = special make
+    // v2.3: a heat-transfer line – product group 53 with "transfer" in the name or an ID/TX code (tax tabs are group 53 too and are left out)
+    ln.transfer=!!s&&(s.grp||'').trim()==='53'&&(/transfer/i.test((l.desc||'')+' '+(s.name||''))||/^(ID|TX)\d/.test(l.code));
     o.lines.push(ln);LINES.push(ln);
   });
   ORDERS.forEach(o=>o.lines.sort((a,b)=>a.seq-b.seq));
@@ -514,11 +522,12 @@ function build(){
       if(d&&d>exp)exp=d;
     });
     ln.unknown=unknown;ln.expected=unknown?null:exp;ln.waiting=anyWait;ln.overdue=overdue;
+    ln.prodWait=anyWait&&ln.sources.some(s=>prodSrc(s,ln));   // v2.2: still in production (or needs a works order)
     const prom=pd(ln.promised);ln.promD=prom;
     if(ln.out<=0)ln.status='done';
     else if(ln.charge||ln.freetext)ln.status='na';
     else if(ln.hold&&!SET.holdSO)ln.status='hold';
-    else if(prom&&prom<t)ln.status='late';
+    else if(prom&&(prom<t||(+prom===+t&&ln.prodWait)))ln.status='late';   // v2.2: due today and still in production = late
     else if(ln.sources.some(s=>s.t==='short'||s.t==='smpend'))ln.status='short';
     else if(unknown||overdue)ln.status='risk';   // overdue: the WO or PO date has passed and it is still not in
     else if(!anyWait)ln.status='stock';
@@ -530,6 +539,7 @@ function build(){
   LINES.filter(l=>l.co!=='TIBARD').forEach(lineDate);
 
   // ── order roll-up ──
+  const horizon=nextWorkDay(t,SET.ahead||10);
   ORDERS.forEach(o=>{
     const live=o.lines.filter(l=>l.out>0&&!l.charge&&!l.freetext);
     o.outLines=live.length;o.outQty=live.reduce((x,l)=>x+l.out,0);o.ordQty=o.lines.reduce((x,l)=>x+l.q1,0);o.despQty=o.lines.reduce((x,l)=>x+l.q2,0);
@@ -552,9 +562,16 @@ function build(){
     const isSupp=s=>s.t==='cont'||(s.t==='po'&&(!s.via||s.via.sources.some(x=>x.t==='cont'||x.t==='po')));
     o.waitProd=waiting.some(l=>l.sources.some(isProd));
     o.waitSupp=waiting.some(l=>l.sources.some(isSupp));
+    // v2.2: the morning-meeting lists
+    o.prodLines=waiting.filter(l=>l.prodWait);o.needProd=o.prodLines.length>0;
+    o.embLines=o.lines.filter(l=>l.out>0&&isEmbCode(l.code));
+    o.embWO=waiting.some(l=>l.sources.some(s=>s.t==='wo'&&s.embOnly));
+    o.trLines=o.lines.filter(l=>l.out>0&&l.transfer);   // v2.3: transfers to apply
+    o.emb=o.embLines.length>0||o.trLines.length>0||o.embWO||/^\s*(EMB|DTF|PRINT)\b/i.test(o.ref||'');
+    o.in10=!!o.promD&&o.promD<=horizon;   // due within the next working days, anything late included
     if(!live.length)o.status='done';
     else if(o.hold&&!SET.holdSO)o.status='hold';
-    else if(o.days!=null&&o.days<0)o.status='late';
+    else if(o.days!=null&&(o.days<0||(o.days===0&&o.needProd)))o.status='late';   // v2.2: due today, goods still in production
     else if(live.some(l=>l.status==='short'||l.status==='risk'))o.status='risk';
     else if(!waiting.length)o.status='stock';
     else o.status='covered';
@@ -609,6 +626,8 @@ function vis(o){
 }
 const liveOrders=()=>ORDERS.filter(o=>o.status!=='done'&&vis(o));
 const riskOrders=()=>liveOrders().filter(o=>o.status==='late'||o.status==='risk');
+const prod10=()=>liveOrders().filter(o=>o.needProd&&o.in10&&o.status!=='hold');   // v2.2 production meeting list
+const emb10=()=>liveOrders().filter(o=>o.emb&&o.in10&&o.status!=='hold');         // v2.2 embroidery meeting list
 
 /* ── labels ────────────────────────────────────────────────────────────── */
 const STATUS_PILL={late:['p-red','Late'],risk:['p-amber','At risk'],short:['p-red','Not on order'],covered:['p-blue','Covered'],stock:['p-green','In stock'],done:['p-grey','Despatched'],hold:['p-grey','On hold'],na:['p-grey','n/a']};
@@ -616,7 +635,7 @@ const pill=st=>{const p=STATUS_PILL[st]||['p-grey',st];return `<span class="pill
 const GROUP_LABEL={bought:'Bought in',made:'Made in house',both:'Waiting on both',"":'–'};
 const WAIT_LABEL={bought:'a supplier purchase order',made:'production (a works order or container)',both:'production and a supplier',"":'nothing'};
 const groupPill=g=>g==='bought'?'<span class="pill p-gold">Bought in</span>':g==='made'?'<span class="pill p-blue">Made in house</span>':g==='both'?'<span class="pill p-grey">Both</span>':'';
-function daysCell(o){if(o.days==null)return '<span class="sm">no date</span>';const d=o.days;const cls=d<0?'late':d<=SET.soon?'soon':'';return `<span class="days ${cls}">${d<0?Math.abs(d)+'d late':d===0?'today':d+'d'}</span>`}
+function daysCell(o){if(o.days==null)return '<span class="sm">no date</span>';const d=o.days;const cls=d<0||o.status==='late'?'late':d<=SET.soon?'soon':'';return `<span class="days ${cls}">${d<0?Math.abs(d)+'d late':d===0?'today':d+'d'}</span>`}
 function srcChip(s,ln){
   const q=fmt(s.qty);
   switch(s.t){
@@ -803,6 +822,51 @@ function orderTable(list,tab){
   return h+'</tbody></table></div>';
 }
 
+// v2.2: the two morning-meeting lists (production, embroidery) – one table, date order
+function prodSummary(o,plain){
+  const parts=[];
+  o.prodLines.forEach(l=>l.sources.forEach(s=>{
+    let k='';const x=s.t==='po'&&s.via?s.via.sources.filter(y=>prodSrc(y,s.via)):[s];
+    x.forEach(y=>{
+      if(y.t==='wo')k=y.ref+(y.embOnly?' (EMB)':'')+' due '+(y.due?(plain?y.due:fd(pd(y.due))):'?')+(y.overdue?' – overdue':'');
+      else if(y.t==='smpend')k='special make, no works order yet';
+      else if(y.t==='short')k='not on a works order';
+      else return;
+      parts.push({code:l.base,qty:y.qty,k,bad:y.t!=='wo'||y.overdue});
+    });
+  }));
+  if(plain)return parts.map(p=>fmt(p.qty)+' x '+p.code+': '+p.k).join(' | ');
+  return parts.slice(0,6).map(p=>`<div><b>${fmt(p.qty)}</b> × <span class="code">${esc(p.code)}</span> · <span${p.bad?' style="color:var(--red)"':''}>${esc(p.k)}</span></div>`).join('')+(parts.length>6?'<div class="sm">+'+(parts.length-6)+' more – open the order</div>':'');
+}
+function embSummary(o,plain){
+  let parts=o.embLines.map(l=>(l.desc||l.code).replace(/^EMBROIDERY (LOGO|TEXT) (APPLICATION|ORIGINATION) CHARGE[\s-]*/i,'').trim()||(/^TEXT/.test(l.code)?'Text':/ORIGINATION/.test(l.code)?'Logo origination':'Logo'));
+  parts=[...new Set(parts)].map(x=>({k:'EMB',x}));
+  const tr=new Map();o.trLines.forEach(l=>{const d=(l.desc||l.code).trim();tr.set(d,(tr.get(d)||0)+l.out)});   // v2.3: same transfer on several lines = one row
+  tr.forEach((q,d)=>parts.push({k:'Transfer',x:fmt(q)+' × '+d}));
+  if(!parts.length)parts.push({k:'',x:o.embWO?'Embroidery-only works order':'EMB / print order reference – no embroidery or transfer line on the order'});
+  if(plain)return parts.map(p=>(p.k==='Transfer'?'Transfer: ':'')+p.x).join(' | ');
+  return parts.slice(0,5).map(p=>`<div>${p.k==='Transfer'?'<span class="pill p-blue">Transfer</span> ':''}${esc(p.x)}</div>`).join('')+(parts.length>5?'<div class="sm">+'+(parts.length-5)+' more – open the order</div>':'');
+}
+function meetTable(list,tab){
+  if(!list.length)return '<div class="empty">Nothing here.</div>';
+  const isP=tab==='prod10';
+  let h=`<div class="tw"><table><thead><tr>${th(tab,'status','Status')}${th(tab,'so','Order')}${th(tab,'cust','Customer')}${th(tab,'prom','Promised')}${th(tab,'days','Days')}${th(tab,'out','To go','num')}${isP?'<th>In production</th>':'<th>Embroidery / transfer</th><th>Garments</th>'}${th(tab,'exp','Expected')}</tr></thead><tbody>`;
+  list.forEach(o=>{
+    h+=`<tr class="row" onclick="openOrder('${esc(o.key)}')"><td>${pill(o.status)}${o.special?' <span class="pill p-gold" title="Special make">SM</span>':''}</td><td>${coTag(o.co)} <span class="code">${esc(o.doc)}</span></td><td>${esc(custName(o))}<div class="desc">${custName(o)===o.ref.trim().replace(/^(EMB|DTF):\s*/i,'')?esc(o.acctName):esc(o.ref)}</div></td><td>${fd(o.promD)}</td><td>${daysCell(o)}</td><td class="num">${fmt(o.outQty)}<div class="sm">${o.outLines} line${o.outLines===1?'':'s'}</div></td>${isP?`<td class="sm summary-list" style="color:var(--txt)">${prodSummary(o)}</td>`:`<td class="sm summary-list" style="color:var(--txt)">${embSummary(o)}</td><td class="sm" style="color:var(--txt)">${o.waiting.length?waitSummary(o):'<span class="pill p-green">In stock</span>'}</td>`}<td>${orderExp(o)}</td></tr>`;
+  });
+  return h+'</tbody></table></div>';
+}
+function exportMeetCsv(tab){
+  const isP=tab==='prod10',rows=sortBy(isP?prod10():emb10(),tab,{k:'prom',d:'a'});
+  const cell=s=>'"'+String(s==null?'':s).replace(/"/g,'""')+'"';
+  const lines=[['Status','Company','SO','Customer','Account','Their ref','Ordered','Promised','Days','Lines to go','Qty to go'].concat(isP?['In production']:['Embroidery / transfer','Garments'],['Expected']).map(cell).join(',')];
+  rows.forEach(o=>{
+    const g=o.waiting.length?waitSummary(o).replace(/<br>/g,' | ').replace(/<[^>]+>/g,'').replace(/&amp;/g,'&').replace(/&#39;/g,"'").replace(/&quot;/g,'"').replace(/&lt;/g,'<').replace(/&gt;/g,'>'):'in stock';
+    lines.push([STATUS_PILL[o.status][1],o.co,o.doc,custName(o),o.acct,o.ref,o.added,o.promised,o.days,o.outLines,o.outQty].concat(isP?[prodSummary(o,true)]:[embSummary(o,true),g],[o.unknown?'unknown':iso(o.expected)]).map(cell).join(','));
+  });
+  const a=document.createElement('a');a.href=URL.createObjectURL(new Blob(['\ufeff'+lines.join('\r\n')],{type:'text/csv'}));a.download=(isP?'production':'embroidery')+'-list-'+iso(today())+'.csv';document.body.appendChild(a);a.click();setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove()},500);
+}
+
 // ── Late & at risk ──
 function renderRisk(v){
   const all=riskOrders();
@@ -810,8 +874,16 @@ function renderRisk(v){
   const contested=liveOrders().filter(o=>o.contested);
   const special=liveOrders().filter(o=>o.special>0);
   const lateProd=late.filter(o=>o.waitProd),lateSupp=late.filter(o=>o.waitSupp);
-  const tiles=[['late','red',late.length,'late (promised date passed)'],['lateProd','red',lateProd.length,'late – waiting on production'],['lateSupp','red',lateSupp.length,'late – waiting on suppliers (incl. Clockwork)'],['risk','amber',risk.length,'at risk'],['contested','amber',contested.length,'stock contested'],['soon','steel',liveOrders().filter(o=>o.days!=null&&o.days>=0&&o.days<=SET.soon).length,`due within ${SET.soon} days`],['special','gold',special.length,`special makes (${special.filter(o=>o.specialWait>0).length} still in production)`]];
+  const p10=prod10(),e10=emb10(),AH=SET.ahead||10;
+  const tiles=[['late','red',late.length,'late (promised date passed)'],['lateProd','red',lateProd.length,'late – waiting on production'],['lateSupp','red',lateSupp.length,'late – waiting on suppliers (incl. Clockwork)'],['risk','amber',risk.length,'at risk'],['contested','amber',contested.length,'stock contested'],['soon','steel',liveOrders().filter(o=>o.days!=null&&o.days>=0&&o.days<=SET.soon).length,`due within ${SET.soon} days`],['special','gold',special.length,`special makes (${special.filter(o=>o.specialWait>0).length} still in production)`],
+    ['prod10','navy',p10.length,`production list – next ${AH} working days + late (${p10.filter(o=>o.status==='late').length})`],['emb10','navy',e10.length,`embroidery &amp; transfer list – next ${AH} working days + late (${e10.filter(o=>o.status==='late').length})`]];
   let h=`<div class="tiles">${tiles.map(t=>`<div class="tile ${t[1]} ${UI.tile===t[0]?'on':''}" onclick="setTile('${t[0]}')"><b>${t[2]}</b><span>${t[3]}</span></div>`).join('')}</div>`;
+  if(UI.tile==='prod10'||UI.tile==='emb10'){   // v2.2: one list in date order for the morning meeting
+    const isP=UI.tile==='prod10',rows=sortBy(isP?p10:e10,UI.tile,{k:'prom',d:'a'});
+    h+=`<div class="sec"><h3>${isP?'Production':'Embroidery & transfers'} – late or due by ${fd(nextWorkDay(today(),AH))} <span class="n">${rows.length}</span><span class="r">${isP?'orders with goods still in production or needing a works order':'orders with embroidery or transfers to do'} · oldest promised date first · <a href="javascript:void(0)" onclick="exportCsv('${UI.tile}')">Export CSV</a> · <a href="javascript:void(0)" onclick="window.print()">Print</a></span></h3><div class="card" style="margin-top:8px">${meetTable(rows,UI.tile)}</div></div>`;
+    h+=`<div class="legend"><span><b>Late</b> = promised date has passed, or the order is due today and its goods are still in production.</span>${isP?'<span><b>In production</b> = the lines waiting on a works order, a special make with no works order yet, or a made-in-house code with nothing on order. Lines waiting only on a Clockwork container or a supplier PO are not counted here.</span>':'<span><b>Embroidery</b> = the order has an embroidery charge line still to go (logo application, text application or logo origination), an EMB: order reference, or a line on an embroidery-only works order. <b>Transfer</b> = a transfer line still to go (Sage product group 53, tax tabs left out) or a DTF: / Print: order reference.</span><span><b>Garments</b> = whether the goods to embroider are in stock now or what they are waiting on.</span>'}<span>Intercompany and on-hold orders are not listed.</span></div>`;
+    v.innerHTML=h;return;
+  }
   let list=all;
   if(UI.tile==='late')list=late;else if(UI.tile==='lateProd')list=lateProd;else if(UI.tile==='lateSupp')list=lateSupp;else if(UI.tile==='risk')list=risk;else if(UI.tile==='contested')list=contested;else if(UI.tile==='soon')list=liveOrders().filter(o=>o.days!=null&&o.days>=0&&o.days<=SET.soon);else if(UI.tile==='special')list=special;
   const groups=[['bought','Bought in','Waiting on a supplier PO'],['made','Made in house','Waiting on a works order or a Clockwork container – including codes usually bought from Clockwork that have a works order on'],['both','Waiting on both','Some lines on production, some on a supplier']];
@@ -821,11 +893,12 @@ function renderRisk(v){
     h+=`<div class="sec"><h3>${g[1]} <span class="n">${rows.length}</span><span class="r">${g[2]} · <a href="javascript:void(0)" onclick="exportCsv('${g[0]}')">Export CSV</a></span></h3><div class="card" style="margin-top:8px">${orderTable(rows,'risk-'+g[0])}</div></div>`;
   });
   if(none.length)h+=`<div class="sec"><h3>${UI.tile==='special'?'Made and booked in':'Nothing waiting – date only'} <span class="n">${none.length}</span><span class="r">${UI.tile==='special'?'the special make is in stock; the order can be picked':'everything outstanding is in stock; the promised date has passed or is contested'}</span></h3><div class="card" style="margin-top:8px">${orderTable(sortBy(none,'risk-none',{k:'days',d:'a'}),'risk-none')}</div></div>`;
-  h+=`<div class="legend"><span><b>Late</b> = promised date (Sage order header) has passed with quantity still to go.</span><span><b>At risk</b> = a line's cover arrives after the promised date, or on an unknown date, or nothing is on order for it.</span><span><b>Contested</b> = the line has stock only because it is older than another live order that will go short.</span><span><b>Overdue</b> = a works order or PO date has passed and it is still not in.</span><span><b>Waiting on production</b> = a late order with a line on a works order (or a special make with no WO yet). <b>Waiting on suppliers</b> = a late order with a line on a container or a supplier PO, Clockwork included. An order can be in both.</span><span><b>Special make</b> = a made-in-house line whose code is not stock held in Sage (or one the planner lists as a special make).</span><span>Intercompany orders (OLIVER / TIB003) are not listed.</span></div>`;
+  h+=`<div class="legend"><span><b>Late</b> = promised date (Sage order header) has passed with quantity still to go, or the order is due today and its goods are still in production.</span><span><b>At risk</b> = a line's cover arrives after the promised date, or on an unknown date, or nothing is on order for it.</span><span><b>Contested</b> = the line has stock only because it is older than another live order that will go short.</span><span><b>Overdue</b> = a works order or PO date has passed and it is still not in.</span><span><b>Waiting on production</b> = a late order with a line on a works order (or a special make with no WO yet). <b>Waiting on suppliers</b> = a late order with a line on a container or a supplier PO, Clockwork included. An order can be in both.</span><span><b>Special make</b> = a made-in-house line whose code is not stock held in Sage (or one the planner lists as a special make).</span><span>Intercompany orders (OLIVER / TIB003) are not listed.</span></div>`;
   v.innerHTML=h;
 }
 function setTile(t){UI.tile=UI.tile===t?'':t;render()}
 function exportCsv(g){
+  if(g==='prod10'||g==='emb10')return exportMeetCsv(g);
   const all=riskOrders();
   let list=all;if(UI.tile==='late')list=all.filter(o=>o.status==='late');else if(UI.tile==='lateProd')list=all.filter(o=>o.status==='late'&&o.waitProd);else if(UI.tile==='lateSupp')list=all.filter(o=>o.status==='late'&&o.waitSupp);else if(UI.tile==='risk')list=all.filter(o=>o.status==='risk');else if(UI.tile==='contested')list=liveOrders().filter(o=>o.contested);else if(UI.tile==='soon')list=liveOrders().filter(o=>o.days!=null&&o.days>=0&&o.days<=SET.soon);else if(UI.tile==='special')list=liveOrders().filter(o=>o.special>0);
   const rows=sortBy(list.filter(o=>o.group===g),'risk-'+g,{k:'days',d:'a'});

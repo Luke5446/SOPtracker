@@ -81,6 +81,21 @@ orders, containers) and nothing else.
 
 ## Changelog
 
+- v2.3 (10 Nov 2026) – the embroidery list now includes orders with transfers
+  to apply: a transfer line still to go (Sage product group 53 with "transfer"
+  in the name or an ID/TX code; tax tabs left out) or a DTF: / Print: order
+  reference. Transfer lines show with a Transfer pill and their quantity.
+- v2.2 (10 Nov 2026) – an order due today whose goods are still in production
+  (on a works order, a special make with no works order yet, or a made-in-house
+  code with nothing on order) now counts as late. Two new tiles on Late & at
+  risk for the morning meetings, each one list in promised-date order with CSV
+  export and print: **production list** (late or due in the next 10 working
+  days, goods still in production or needing a works order) and **embroidery
+  list** (same dates, orders with an embroidery charge line still to go –
+  LOGOAPPLICATION, TEXTAPPLICATION, LOGOORIGINATION – an EMB: order reference
+  or a line on an embroidery-only works order; shows the logo details and
+  whether the garments are in stock). Transfers / print are not counted. No
+  change to the Sage paste or stored data.
 - v2.1 (9 Nov 2026) - opening an order from a list scrolls the order card into
   view (it sat below the header, tabs and Find box, out of sight on a small
   screen), and the back arrow returns to where the list was scrolled to.
