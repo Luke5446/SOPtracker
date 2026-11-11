@@ -132,6 +132,7 @@ tr.det td{background:#f8fafd;padding:10px 14px 14px 30px;cursor:default}
 .dueBtn:hover{background:var(--navy);color:#fff}
 body:not(.viewer-mode) .dueBtn{display:inline-block}
 .dueNew{color:#b45309;font-weight:700}
+.expSet{color:#065f46;font-weight:700}
 .md{background:#fff;border-radius:10px;width:100%;max-width:760px;box-shadow:0 12px 40px rgba(20,30,50,.3)}
 .md h3{font-size:16px;color:var(--navy);padding:14px 18px;border-bottom:1px solid var(--line);display:flex;align-items:center}
 .md h3 .x{margin-left:auto;background:none;border:0;font-size:20px;cursor:pointer;color:var(--mut)}
@@ -243,6 +244,24 @@ textarea{width:100%;min-height:150px;font-size:11px;font-family:Consolas,monospa
 </div>
 
 <!-- Works order due date modal (v2.0) -->
+<div class="ov" id="expOv">
+  <div class="md" style="max-width:460px">
+    <h3>Expected date (embroidery list) <button class="x" onclick="closeOv('expOv')" aria-label="Close">×</button></h3>
+    <div class="body">
+      <p id="expInfo"></p>
+      <div class="set">
+        <label>Expected date</label>
+        <div><input type="date" id="expInp"><div class="h">The date agreed at the production meeting. Shown on the embroidery list and the order in place of the worked-out date; <b>Publish for team</b> sends it to the view-only page so the sales office can put it on the Sage order.</div></div>
+      </div>
+    </div>
+    <div class="foot">
+      <button class="btn btn-navy" onclick="saveExpEdit()">Save</button>
+      <button class="btn btn-line" onclick="closeOv('expOv')">Cancel</button>
+      <button class="btn btn-line" id="expDrop" onclick="dropExpEdit()" title="Remove the date; the worked-out expected date comes back">Remove date</button>
+      <span class="msg" id="expMsg"></span>
+    </div>
+  </div>
+</div>
 <div class="ov" id="dueOv">
   <div class="md" style="max-width:460px">
     <h3>Change due date <button class="x" onclick="closeOv('dueOv')" aria-label="Close">×</button></h3>
@@ -288,8 +307,8 @@ textarea{width:100%;min-height:150px;font-size:11px;font-family:Consolas,monospa
    "Contested": a line only has stock because it is older than another order
    that will go short on the same code.
    ═══════════════════════════════════════════════════════════════════════ */
-const APP_VER='2.3';
-const LS_RAW='ordertracker_raw', LS_TS='ordertracker_ts', LS_SET='ordertracker_settings', LS_DUE='ordertracker_wodue';
+const APP_VER='2.4';
+const LS_RAW='ordertracker_raw', LS_TS='ordertracker_ts', LS_SET='ordertracker_settings', LS_DUE='ordertracker_wodue', LS_EMBX='ordertracker_embexp';
 const DEF_SET={
   made:['Tibard','Oliver Harvey','Clockwork','Clockwork Clothing','Clockwork Giant Clothing'],
   groups:['54'], holdSO:false, share:true, soon:7, ahead:10
@@ -550,6 +569,7 @@ function build(){
     o.specialWait=live.filter(l=>l.special&&l.waiting).length; // of those, still in production / not yet raised
     let exp=t,unk=false;live.forEach(l=>{if(l.unknown)unk=true;else if(l.expected&&l.expected>exp)exp=l.expected});
     o.expected=unk?null:exp;o.unknown=unk;
+    o.expSet=EMBX[o.key]?pd(EMBX[o.key].date):null;   // v2.4: expected date set at the production meeting (embroidery list)
     o.contested=live.some(l=>l.contested);
     const kinds=new Set();waiting.forEach(l=>l.sources.forEach(s=>{
       if(s.t==='wo'||s.t==='cont'||s.t==='smpend')kinds.add('made');
@@ -577,6 +597,7 @@ function build(){
     else o.status='covered';
     o.hay=(o.doc+' '+o.acctName+' '+o.acct+' '+o.ref+' '+o.user+' '+o.lines.map(l=>l.code+' '+l.desc).join(' ')).toLowerCase();
   });
+  pruneEmbX();
   computeJumps();
 }
 
@@ -696,8 +717,8 @@ function renderHeader(){
   const h=document.getElementById('hdrStatus');
   if(!DATA.so.length){h.innerHTML='No data loaded';return}
   const live=ORDERS.filter(o=>o.status!=='done'&&!o.ic).length;
-  const nd=Object.keys(DUE).length;
-  h.innerHTML=`<b>${live}</b> live orders · Sage ${DATA.ts?fdt(DATA.ts):'?'}<br>WOs ${PP.ok?fdt(PP.savedAt):'<span style="color:#fca5a5">not read</span>'} · containers ${SP.ok?fdt(SP.savedAt):'<span style="color:#fca5a5">not read</span>'}${nd&&IS_EDITOR?` · <span style="color:#fcd34d">${nd} due date change${nd>1?'s':''} to publish</span>`:''}`;
+  const nd=Object.keys(DUE).length,nx=embXPending();
+  h.innerHTML=`<b>${live}</b> live orders · Sage ${DATA.ts?fdt(DATA.ts):'?'}<br>WOs ${PP.ok?fdt(PP.savedAt):'<span style="color:#fca5a5">not read</span>'} · containers ${SP.ok?fdt(SP.savedAt):'<span style="color:#fca5a5">not read</span>'}${nd&&IS_EDITOR?` · <span style="color:#fcd34d">${nd} due date change${nd>1?'s':''} to publish</span>`:''}${nx&&IS_EDITOR?` · <span style="color:#fcd34d">${nx} expected date change${nx>1?'s':''} to publish</span>`:''}`;
 }
 
 // ── Find an order ──
@@ -772,7 +793,7 @@ function orderCard(o){
       <div><div class="lab">Their order ref</div><div class="val">${esc(o.ref)||'–'}</div></div>
       <div><div class="lab">Order date (added to Sage)</div><div class="val">${fdl(pd(o.added))}</div></div>
       <div><div class="lab">Promised date</div><div class="val">${fdl(o.promD)}<span class="sm">${daysCell(o)}</span></div></div>
-      <div><div class="lab">Expected complete</div><div class="val">${orderExp(o)}</div></div>
+      <div><div class="lab">Expected complete</div><div class="val">${orderExp(o)}${o.expSet||(IS_EDITOR&&o.emb)?`<span class="sm">${o.expSet?`<span class="expSet">${fd(o.expSet)}</span> set at the production meeting`:'embroidery'}${expBtn(o)}</span>`:''}</div></div>
       <div><div class="lab">Outstanding</div><div class="val">${fmt(o.outQty)} of ${fmt(o.ordQty)}<span class="sm">${o.outLines} line${o.outLines===1?'':'s'} to go</span></div></div>
     </div>
     <div class="why ${cls}">${why}</div>
@@ -808,7 +829,7 @@ function lineDetail(ln){
 function sortBy(list,tab,def){
   const s=UI.sort[tab]||def;
   const key=s.k,dir=s.d;
-  const val=o=>{switch(key){case 'so':return o.doc;case 'cust':return o.acctName.toLowerCase();case 'prom':return o.promised||'9999';case 'added':return o.added||'9999';case 'exp':return o.unknown?'9999':iso(o.expected);case 'days':return o.days==null?9999:o.days;case 'out':return o.outQty;case 'status':return ({late:0,risk:1,covered:2,stock:3,hold:4}[o.status]||5);case 'group':return o.group;default:return o.doc}};
+  const val=o=>{switch(key){case 'so':return o.doc;case 'cust':return o.acctName.toLowerCase();case 'prom':return o.promised||'9999';case 'added':return o.added||'9999';case 'exp':return o.expSet?iso(o.expSet):o.unknown?'9999':iso(o.expected);case 'days':return o.days==null?9999:o.days;case 'out':return o.outQty;case 'status':return ({late:0,risk:1,covered:2,stock:3,hold:4}[o.status]||5);case 'group':return o.group;default:return o.doc}};
   return list.slice().sort((a,b)=>{const x=val(a),y=val(b);return (x<y?-1:x>y?1:0)*(dir==='d'?-1:1)||a.doc.localeCompare(b.doc)});
 }
 function th(tab,k,label,cls){const s=UI.sort[tab];const on=s&&s.k===k;return `<th class="sortable ${cls||''} ${on?(s.d==='d'?'sd':'s'):''}" onclick="setSort('${tab}','${k}')">${label}</th>`}
@@ -852,7 +873,7 @@ function meetTable(list,tab){
   const isP=tab==='prod10';
   let h=`<div class="tw"><table><thead><tr>${th(tab,'status','Status')}${th(tab,'so','Order')}${th(tab,'cust','Customer')}${th(tab,'prom','Promised')}${th(tab,'days','Days')}${th(tab,'out','To go','num')}${isP?'<th>In production</th>':'<th>Embroidery / transfer</th><th>Garments</th>'}${th(tab,'exp','Expected')}</tr></thead><tbody>`;
   list.forEach(o=>{
-    h+=`<tr class="row" onclick="openOrder('${esc(o.key)}')"><td>${pill(o.status)}${o.special?' <span class="pill p-gold" title="Special make">SM</span>':''}</td><td>${coTag(o.co)} <span class="code">${esc(o.doc)}</span></td><td>${esc(custName(o))}<div class="desc">${custName(o)===o.ref.trim().replace(/^(EMB|DTF):\s*/i,'')?esc(o.acctName):esc(o.ref)}</div></td><td>${fd(o.promD)}</td><td>${daysCell(o)}</td><td class="num">${fmt(o.outQty)}<div class="sm">${o.outLines} line${o.outLines===1?'':'s'}</div></td>${isP?`<td class="sm summary-list" style="color:var(--txt)">${prodSummary(o)}</td>`:`<td class="sm summary-list" style="color:var(--txt)">${embSummary(o)}</td><td class="sm" style="color:var(--txt)">${o.waiting.length?waitSummary(o):'<span class="pill p-green">In stock</span>'}</td>`}<td>${orderExp(o)}</td></tr>`;
+    h+=`<tr class="row" onclick="openOrder('${esc(o.key)}')"><td>${pill(o.status)}${o.special?' <span class="pill p-gold" title="Special make">SM</span>':''}</td><td>${coTag(o.co)} <span class="code">${esc(o.doc)}</span></td><td>${esc(custName(o))}<div class="desc">${custName(o)===o.ref.trim().replace(/^(EMB|DTF):\s*/i,'')?esc(o.acctName):esc(o.ref)}</div></td><td>${fd(o.promD)}</td><td>${daysCell(o)}</td><td class="num">${fmt(o.outQty)}<div class="sm">${o.outLines} line${o.outLines===1?'':'s'}</div></td>${isP?`<td class="sm summary-list" style="color:var(--txt)">${prodSummary(o)}</td>`:`<td class="sm summary-list" style="color:var(--txt)">${embSummary(o)}</td><td class="sm" style="color:var(--txt)">${o.waiting.length?waitSummary(o):'<span class="pill p-green">In stock</span>'}</td>`}<td>${isP?orderExp(o):embExpCell(o)}</td></tr>`;
   });
   return h+'</tbody></table></div>';
 }
@@ -862,7 +883,7 @@ function exportMeetCsv(tab){
   const lines=[['Status','Company','SO','Customer','Account','Their ref','Ordered','Promised','Days','Lines to go','Qty to go'].concat(isP?['In production']:['Embroidery / transfer','Garments'],['Expected']).map(cell).join(',')];
   rows.forEach(o=>{
     const g=o.waiting.length?waitSummary(o).replace(/<br>/g,' | ').replace(/<[^>]+>/g,'').replace(/&amp;/g,'&').replace(/&#39;/g,"'").replace(/&quot;/g,'"').replace(/&lt;/g,'<').replace(/&gt;/g,'>'):'in stock';
-    lines.push([STATUS_PILL[o.status][1],o.co,o.doc,custName(o),o.acct,o.ref,o.added,o.promised,o.days,o.outLines,o.outQty].concat(isP?[prodSummary(o,true)]:[embSummary(o,true),g],[o.unknown?'unknown':iso(o.expected)]).map(cell).join(','));
+    lines.push([STATUS_PILL[o.status][1],o.co,o.doc,custName(o),o.acct,o.ref,o.added,o.promised,o.days,o.outLines,o.outQty].concat(isP?[prodSummary(o,true)]:[embSummary(o,true),g],[o.expSet?iso(o.expSet):o.unknown?'unknown':iso(o.expected)]).map(cell).join(','));
   });
   const a=document.createElement('a');a.href=URL.createObjectURL(new Blob(['\ufeff'+lines.join('\r\n')],{type:'text/csv'}));a.download=(isP?'production':'embroidery')+'-list-'+iso(today())+'.csv';document.body.appendChild(a);a.click();setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove()},500);
 }
@@ -1021,6 +1042,49 @@ function saveDueEdit(){
   if(v===was){delete DUE[dueRef];w.due=was;w.dueEdited=false}else{DUE[dueRef]={due:v,was,setAt:new Date().toISOString()};w.due=v;w.dueEdited=true}
   dueSave();closeOv('dueOv');build();render();
 }
+/* ── expected dates on the embroidery list (v2.4) ──────────────────────────
+   Most embroidery orders have no works order, so there is no due date to
+   move. Instead the production meeting agrees an expected date per order,
+   kept here as EMBX {orderKey:{date, setAt}} (LS_EMBX on the editor PC) and
+   published inside data.json as `embExp`, so the view-only page shows it and
+   the sales office can put it on the Sage order as the new promise date.      */
+let EMBX=IS_EDITOR?lsGet(LS_EMBX,{}):{};if(!EMBX||typeof EMBX!=='object'||Array.isArray(EMBX))EMBX={};
+let EMBX_PUB={};   // what the published data.json carries, to count unpublished changes
+function embXSave(){if(IS_EDITOR)lsSet(LS_EMBX,EMBX)}
+function embXPending(){if(!IS_EDITOR)return 0;let n=0;const keys=new Set([...Object.keys(EMBX),...Object.keys(EMBX_PUB)]);keys.forEach(k=>{const a=EMBX[k],b=EMBX_PUB[k];if((a?a.date:'')!==(b?b.date:''))n++});return n}
+function mergeEmbX(pub){   // published entries: viewers take them as they are; the editor keeps its own newer ones
+  if(!pub||typeof pub!=='object'||Array.isArray(pub))pub={};
+  EMBX_PUB=JSON.parse(JSON.stringify(pub));
+  if(!IS_EDITOR){EMBX=JSON.parse(JSON.stringify(pub));return}
+  let ch=false;Object.keys(pub).forEach(k=>{const p=pub[k],l=EMBX[k];if(p&&p.date&&(!l||(p.setAt||'')>(l.setAt||''))){EMBX[k]=Object.assign({},p);ch=true}});
+  if(ch)embXSave();
+}
+function pruneEmbX(){   // forget dates for orders that are no longer live
+  if(!DATA.so.length)return;let ch=false;
+  Object.keys(EMBX).forEach(k=>{const o=ORD_IDX.get(k);if(!o||!o.lines.some(l=>l.out>0&&!l.charge&&!l.freetext)){delete EMBX[k];ch=true}});
+  if(ch)embXSave();
+}
+function embExpCell(o){
+  const btn=expBtn(o);
+  if(o.expSet){const p=o.promD;return `<span class="expSet"${p&&o.expSet>p?' style="color:var(--red)"':''} title="Set at the production meeting${EMBX[o.key]&&EMBX[o.key].setAt?' '+fdt(EMBX[o.key].setAt):''}">${fd(o.expSet)}</span>${btn}`}
+  return orderExp(o)+btn;
+}
+function expBtn(o){return IS_EDITOR?`<button class="dueBtn" onclick="event.stopPropagation();openExpEdit('${esc(o.key)}')" title="Set the expected date for SO ${esc(o.doc)}">&#9998;</button>`:''}
+let expKey='';
+function openExpEdit(key){
+  if(!IS_EDITOR)return;const o=ORD_IDX.get(key);if(!o)return;expKey=key;
+  const e=EMBX[key];
+  document.getElementById('expInfo').innerHTML=`<b>SO ${esc(o.doc)}</b> · ${esc(custName(o))}<br>Promised: <b>${fdl(o.promD)}</b> · worked out: <b>${o.unknown?'unknown':o.waiting.length?fdl(o.expected):'in stock now'}</b>${e?`<br>Set at the meeting: <b class="expSet">${fdl(pd(e.date))}</b>${embXPending()&&(!EMBX_PUB[key]||EMBX_PUB[key].date!==e.date)?' – not yet published':''}`:''}`;
+  document.getElementById('expInp').value=e?e.date:(o.expected?iso(o.expected):'');
+  document.getElementById('expDrop').style.display=e?'':'none';document.getElementById('expMsg').textContent='';
+  document.getElementById('expOv').classList.add('show');
+}
+function saveExpEdit(){
+  const v=document.getElementById('expInp').value;if(!/^\d{4}-\d{2}-\d{2}$/.test(v)){document.getElementById('expMsg').textContent='Choose a date.';return}
+  EMBX[expKey]={date:v,setAt:new Date().toISOString()};embXSave();closeOv('expOv');build();render();
+}
+function dropExpEdit(){delete EMBX[expKey];embXSave();closeOv('expOv');build();render()}
+
 function dropDueEdit(){const e=DUE[dueRef];const w=PP.wos.find(x=>x.ref.toUpperCase()===dueRef);if(e&&w){w.due=e.was;w.dueEdited=false}delete DUE[dueRef];dueSave();closeOv('dueOv');build();render()}
 
 // Writing the changes into the planner: the token on this PC must be able to
@@ -1090,14 +1154,14 @@ function publishTeam(){
   if(pubBusy)return;
   const raw=RAW||'';
   const nd=Object.keys(DUE).length;
-  if(!raw||!DATA.so.length){if(nd){publishDueOnly();return}alert('Paste today\'s data first.');return}
-  const state={app:'ordertracker',ver:APP_VER,raw,ts:DATA.ts||new Date().toISOString(),settings:SET,so:DATA.so.length,po:DATA.po.length,stk:DATA.stk.length,savedAt:new Date().toISOString()};
+  if(!raw||!DATA.so.length){if(nd){publishDueOnly();return}alert('Paste today\'s data first'+(embXPending()?' (the expected dates are published with it)':'')+'.');return}
+  const state={app:'ordertracker',ver:APP_VER,raw,ts:DATA.ts||new Date().toISOString(),settings:SET,embExp:EMBX,so:DATA.so.length,po:DATA.po.length,stk:DATA.stk.length,savedAt:new Date().toISOString()};
   const json=JSON.stringify(state),tok=pubToken();
   if(!tok){pubNoToken();return}
   const pb=document.getElementById('pubBtn'),was=pb.innerHTML;
   pubBusy=true;pb.innerHTML='&#8987; Publishing&hellip;';
   const done=(ok,err)=>{pubBusy=false;pb.innerHTML=was;
-    if(ok){pb.innerHTML='&#10003; Published';setTimeout(()=>{pb.innerHTML=was},4000);DATA.pubAt=state.savedAt;render();if(Object.keys(DUE).length)publishDueOnly()}
+    if(ok){pb.innerHTML='&#10003; Published';setTimeout(()=>{pb.innerHTML=was},4000);DATA.pubAt=state.savedAt;EMBX_PUB=JSON.parse(JSON.stringify(EMBX));render();if(Object.keys(DUE).length)publishDueOnly()}
     else publishDownload(json,'GitHub did not take the publish ('+err+').')};
   const headers={'Authorization':'Bearer '+tok,'Accept':'application/vnd.github+json'};
   const attempt=n=>{
@@ -1121,7 +1185,8 @@ function publishDueOnly(){
 }
 function fetchShared(cb,localTs){
   fetch('data.json?t='+Date.now()).then(r=>{if(!r.ok)throw new Error('no data.json');return r.json()}).then(s=>{
-    if(s&&s.raw&&localTs&&(s.ts||'')<=localTs){if(cb)cb(true);return}   // this PC's paste is as new or newer: keep it
+    if(s)mergeEmbX(s.embExp);   // v2.4: expected dates set at the production meeting travel with the publish
+    if(s&&s.raw&&localTs&&(s.ts||'')<=localTs){build();render();if(cb)cb(true);return}   // this PC's paste is as new or newer: keep it
     if(s&&s.raw){
       if(s.settings&&!IS_EDITOR)SET=Object.assign({},DEF_SET,s.settings);
       if(IS_EDITOR){try{localStorage.setItem(LS_RAW,s.raw);localStorage.setItem(LS_TS,s.ts||'')}catch(e){}}

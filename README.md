@@ -73,6 +73,19 @@ planner token (Contents: read and write on `Tibard-Productionplan`); left
 empty, the main token is tried. If GitHub refuses, the change stays on this
 PC and Publish can be pressed again once the token is right.
 
+### Expected dates on the embroidery list (v2.4)
+
+Most embroidery orders have no works order, so there is no due date to move.
+In `?edit` each row on the embroidery & transfer list (and the order card of
+an embroidery order) has a pencil (✎) by its Expected date: pick the date
+agreed at the production meeting, Save. It replaces the worked-out date on
+that list, the CSV export and the order card, in green (red when it is after
+the promised date). Changes are kept on the PC (`ordertracker_embexp`) and
+**Publish for team** sends them inside `data.json` (`embExp`), so the
+view-only page shows them and the sales office can put the date on the Sage
+order as the new promise date. "Remove date" brings the worked-out date back.
+Dates for orders that are no longer live are dropped on the next load.
+
 ## Later
 
 Built so the Sage paste can be swapped for a live Sage link when the apps move
@@ -81,6 +94,9 @@ orders, containers) and nothing else.
 
 ## Changelog
 
+- v2.4 (11 Nov 2026) – editable Expected date on the embroidery & transfer
+  list, set at the production meeting and published to the view-only page
+  (`embExp` in data.json) so the sales office can update the Sage promise date.
 - v2.3 (10 Nov 2026) – the embroidery list now includes orders with transfers
   to apply: a transfer line still to go (Sage product group 53 with "transfer"
   in the name or an ID/TX code; tax tabs left out) or a DTF: / Print: order
