@@ -307,7 +307,7 @@ textarea{width:100%;min-height:150px;font-size:11px;font-family:Consolas,monospa
    "Contested": a line only has stock because it is older than another order
    that will go short on the same code.
    ═══════════════════════════════════════════════════════════════════════ */
-const APP_VER='2.4';
+const APP_VER='2.5';
 const LS_RAW='ordertracker_raw', LS_TS='ordertracker_ts', LS_SET='ordertracker_settings', LS_DUE='ordertracker_wodue', LS_EMBX='ordertracker_embexp';
 const DEF_SET={
   made:['Tibard','Oliver Harvey','Clockwork','Clockwork Clothing','Clockwork Giant Clothing'],
@@ -378,7 +378,10 @@ function parseRaw(txt){
 /* ── the other apps' published data ────────────────────────────────────── */
 const PP_URL='https://luke5446.github.io/Tibard-Productionplan/data.json';
 const SP_URL='https://luke5446.github.io/Tibard-Stock-Planner/data.json';
-let PP={ok:false,err:'',wos:[],codes:new Set(),smPending:new Map(),savedAt:'',sopAt:'',rows:new Map()};
+let PP={ok:false,err:'',wos:[],codes:new Set(),smPending:new Map(),savedAt:'',sopAt:'',rows:new Map(),pipe:[],smPipe:new Map()};
+// v2.5: the planner's pipeline – a works order marked complete counts as stock until 7am the day after, the
+// same rule the planner uses (Sage's overnight routine and the next paste are assumed to carry it by then)
+const pipeActive=completed=>{if(!completed)return false;const d=new Date(completed+'T00:00:00');if(isNaN(d))return false;d.setDate(d.getDate()+1);d.setHours(7,0,0,0);return new Date()<d};
 let SP={ok:false,err:'',cPOs:[],codes:new Set(),nextContDate:'',savedAt:''};
 function fetchPP(){
   fetch(PP_URL+'?t='+Date.now()).then(r=>{if(!r.ok)throw new Error('HTTP '+r.status);return r.json()}).then(s=>{
@@ -389,7 +392,14 @@ function fetchPP(){
     wos.forEach(w=>w.items.forEach(it=>codes.add(it.code)));
     applyDueEdits(wos);
     const smp=new Map();(s.smPending||[]).forEach(o=>{if(o&&o.key)smp.set(o.key,o)});
-    PP={ok:true,err:'',wos,codes,rows,smPending:smp,savedAt:s.savedAt||'',sopAt:(s.sopDemand&&s.sopDemand.pastedAt)||''};
+    // v2.5: completed works orders still in the pipeline; special makes are tied back to their order line through smSeen (lineKey → WO ref)
+    const refKey=new Map();Object.keys(s.smSeen||{}).forEach(k=>{const v=s.smSeen[k];if(v&&v.what==='wo'&&v.ref)refKey.set(String(v.ref).toUpperCase(),k)});
+    const pipe=[],smPipe=new Map();
+    (s.completedWOs||[]).forEach(c=>{if(!c||!pipeActive(c.completed))return;const code=String(c.code||'').toUpperCase(),qty=num(c.qty);if(!code||qty<=0)return;
+      const it={ref:c.ref||'',code,qty,completed:c.completed,sm:!!c.sm};
+      const lk=c.sm?refKey.get(String(c.ref||'').toUpperCase()):null;
+      if(lk){if(!smPipe.has(lk))smPipe.set(lk,[]);smPipe.get(lk).push(it)}else if(!c.sm)pipe.push(it)});
+    PP={ok:true,err:'',wos,codes,rows,smPending:smp,savedAt:s.savedAt||'',sopAt:(s.sopDemand&&s.sopDemand.pastedAt)||'',pipe,smPipe};
     build();render();
   }).catch(e=>{PP.ok=false;PP.err=e&&e.message?e.message:'could not reach it';render()});
 }
@@ -475,6 +485,8 @@ function build(){
     let stock=0;const stockBits=[];
     cos.forEach(co=>[base,'BULK'+base].forEach(code=>{const s=stkFor(co,code);if(s&&s.free>0){stock+=s.free;stockBits.push(coShort(co)+(code!==base?' bulk':'')+' '+fmt(s.free))}}));
     const stockTotal=stock;
+    // v2.5: completed works orders for the code, not yet in Sage (the planner's pipeline) – served after stock, oldest completed first
+    const pipes=PP.pipe.filter(c=>baseCode(c.code)===base).map(c=>({c,left:c.qty})).sort((a,b)=>(a.c.completed||'').localeCompare(b.c.completed||''));let pi=0;
     // works orders carrying the code (special makes are for their own line)
     const wos=[];PP.wos.forEach(w=>{if(w.sm)return;w.items.forEach(it=>{if(baseCode(it.code)===base)wos.push({w,left:it.qty})})});
     wos.sort((a,b)=>(a.w.createdAt||'').localeCompare(b.w.createdAt||'')||a.w.i-b.w.i);
@@ -492,12 +504,16 @@ function build(){
       let need=ln.out;const src=ln.sources;
       if(ln.alloc>0){const q=Math.min(ln.alloc,need);need-=q;src.push({t:'alloc',qty:q})}
       if(need<=0)return;
+      // v2.5: a special make made for this line, completed but not yet booked into Sage
+      (PP.smPipe.get(ln.pkey)||[]).forEach(c=>{if(need<=0)return;const q=Math.min(c.qty,need);need-=q;src.push({t:'pipe',qty:q,ref:c.ref,completed:c.completed,sm:true})});
       // a special make raised for this very line
       const sm=smWO.get(ln.pkey);
       if(sm){ln.special=true;const q=Math.min(need,sm.items.reduce((x,i)=>x+i.qty,0)||need);need-=q;src.push({t:'wo',qty:q,ref:sm.ref,due:sm.due,sm:true,printed:sm.printed})}
       if(need>0&&!sm&&PP.smPending.has(ln.pkey)){ln.special=true;src.push({t:'smpend',qty:need,seen:(PP.smPending.get(ln.pkey)||{}).seenAt||''});need=0}
       // stock, oldest promised first
       if(need>0&&stock>0){const q=Math.min(stock,need);stock-=q;need-=q;src.push({t:'stock',qty:q});stockTakers.push(ln)}
+      // v2.5: then the pipeline – made, awaiting the warehouse book-in
+      while(need>0&&pi<pipes.length){const c=pipes[pi];const q=Math.min(c.left,need);if(q>0){c.left-=q;need-=q;src.push({t:'pipe',qty:q,ref:c.c.ref,completed:c.c.completed})}if(c.left<=0)pi++}
       // the back-to-back PO Sage generated from this order
       if(need>0&&ln.link){pos.filter(p=>soNo(p.src.doc)===ln.link&&p.left>0).forEach(p=>{if(need<=0)return;const q=Math.min(p.left,need);p.left-=q;need-=q;src.push({t:'po',qty:q,po:p,b2b:true})})}
       // works orders, oldest raised first
@@ -510,7 +526,7 @@ function build(){
       ln.stockLeft=stock;
     });
     // contested: stock ran out before every order was served
-    const unserved=lines.filter(ln=>ln.sources.some(s=>s.t!=='stock'&&s.t!=='alloc'&&s.t!=='mirror'));
+    const unserved=lines.filter(ln=>ln.sources.some(s=>s.t!=='stock'&&s.t!=='alloc'&&s.t!=='mirror'&&s.t!=='pipe'));
     if(stockTakers.length&&unserved.length){
       const others=unserved.filter(u=>!stockTakers.includes(u));
       const wanted=lines.filter(ln=>!ln.ic||!shared).reduce((x,l)=>x+l.out,0);
@@ -526,7 +542,7 @@ function build(){
     let exp=t,unknown=false,anyWait=false,overdue=false;
     ln.sources.forEach(s=>{
       let d=null;
-      if(s.t==='alloc'||s.t==='stock'||s.t==='mirror')d=t;
+      if(s.t==='alloc'||s.t==='stock'||s.t==='mirror'||s.t==='pipe')d=t;   // v2.5: pipeline = made, counts as stock
       else if(s.t==='wo'){d=pd(s.due);if(!d)unknown=true;else if(d<t){d=t;overdue=true;s.overdue=true}anyWait=true;s.when=d}
       else if(s.t==='cont'){d=nextWorkDay(pd(s.date),1);anyWait=true;s.when=d}
       else if(s.t==='po'){anyWait=true;const p=s.po.src;
@@ -609,7 +625,7 @@ function build(){
 function computeJumps(){
   JUMPS=[];
   const stockQty=l=>l.sources.filter(s=>s.t==='stock').reduce((x,s)=>x+s.qty,0);
-  const needQty=l=>l.sources.filter(s=>s.t!=='stock'&&s.t!=='alloc'&&s.t!=='mirror').reduce((x,s)=>x+s.qty,0);
+  const needQty=l=>l.sources.filter(s=>s.t!=='stock'&&s.t!=='alloc'&&s.t!=='mirror'&&s.t!=='pipe').reduce((x,s)=>x+s.qty,0);
   const pk=ln=>(ln.made&&SET.share?'ALL':ln.co)+'|'+ln.base;
   ORDERS.forEach(o=>{
     if(o.ic||!(o.status==='late'||o.status==='risk'||o.status==='covered'))return;
@@ -663,6 +679,7 @@ function srcChip(s,ln){
     case 'alloc':return `<span class="src alloc"><b>${q}</b> allocated in Sage</span>`;
     case 'stock':return `<span class="src stock"><b>${q}</b> in stock${ln&&ln.contested?' &#9888;':''}</span>`;
     case 'mirror':return `<span class="src done">intercompany mirror – see the OH order</span>`;
+    case 'pipe':return `<span class="src stock" title="Marked complete on the production planner; counts as stock until 7am the day after"><b>${q}</b> made${s.sm?' (special make)':''} – awaiting Sage book-in <span class="d">· ${esc(s.ref)} completed ${fd(pd(s.completed))}</span></span>`;
     case 'wo':return `<span class="src wo"><b>${q}</b> on ${esc(s.ref)}${s.sm?' (special make)':''}${s.embOnly?' (EMB)':''} <span class="d">· due ${dueTxt(s.ref,s.due)}${s.overdue?' · <b>overdue</b>':''}${s.printed===false?' · not printed':''}</span>${dueBtn(s.ref)}</span>`;
     case 'smpend':return `<span class="src short"><b>${q}</b> special make – no works order yet${s.seen?' <span class="d">(seen '+fd(pd(s.seen))+')</span>':''}</span>`;
     case 'cont':return `<span class="src cont"><b>${q}</b> on ${esc(s.ref)} <span class="d">· lands ${fd(pd(s.date))}, out ${fd(s.when)}</span></span>`;
@@ -968,9 +985,9 @@ function renderData(v){
   const t=DATA.ts?fdt(DATA.ts):'–';
   v.innerHTML=`<div class="card"><h2>Where the data comes from</h2><div class="note">
   <b>Sage</b> (sales orders, purchase orders, stock): pasted ${t}${DATA.pubAt?' · published '+fdt(DATA.pubAt):''} · ${DATA.so.length} SO lines, ${DATA.po.length} PO lines, ${DATA.stk.length} stock rows.<br>
-  <b>Works orders</b>: production planner, ${PP.ok?'published '+fdt(PP.savedAt)+' · '+PP.wos.length+' live works orders · SOP demand pasted '+fdt(PP.sopAt):'<span style="color:var(--red)">not read ('+esc(PP.err)+')</span>'}.<br>
+  <b>Works orders</b>: production planner, ${PP.ok?'published '+fdt(PP.savedAt)+' · '+PP.wos.length+' live works orders · '+(PP.pipe.reduce((x,c)=>x+c.qty,0)+[...PP.smPipe.values()].reduce((x,a)=>x+a.reduce((y,c)=>y+c.qty,0),0))+' units completed, awaiting Sage book-in (pipeline until 7am next day) · SOP demand pasted '+fdt(PP.sopAt):'<span style="color:var(--red)">not read ('+esc(PP.err)+')</span>'}.<br>
   <b>Containers</b>: stock planner, ${SP.ok?'published '+fdt(SP.savedAt)+' · '+SP.cPOs.map(c=>esc(c.ref)+' lands '+fd(pd(c.date))).join(', ')+(SP.nextContDate?' · next order date '+fd(pd(SP.nextContDate)):''):'<span style="color:var(--red)">not read ('+esc(SP.err)+')</span>'}.<br><br>
-  <b>Who gets the stock</b>: Sage allocation first, then free stock to the oldest promised date, then a special-make works order raised for the line, the back-to-back PO Sage generated from the order, live works orders (oldest raised first), containers in landing order, and purchase orders by date. Made-in-house codes${SET.share?' share Tibard, BULK and OH stock as one pool':' are per company'}; bought-in codes are per company. Held orders ${SET.holdSO?'count as':'do not take'} demand.<br><br>
+  <b>Who gets the stock</b>: Sage allocation first, then free stock to the oldest promised date, then units already made on a completed works order but not yet booked into Sage (the planner's pipeline, until 7am the next day), then a special-make works order raised for the line, the back-to-back PO Sage generated from the order, live works orders (oldest raised first), containers in landing order, and purchase orders by date. Made-in-house codes${SET.share?' share Tibard, BULK and OH stock as one pool':' are per company'}; bought-in codes are per company. Held orders ${SET.holdSO?'count as':'do not take'} demand.<br><br>
   <b>Version</b> ${APP_VER}. Order tracker, Tibard Apps. Tomorrow: this paste is replaced by the live Sage link when the apps move on-prem.
   </div></div>`;
 }

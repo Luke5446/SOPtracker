@@ -94,6 +94,12 @@ orders, containers) and nothing else.
 
 ## Changelog
 
+- v2.5 (11 Nov 2026) – works orders marked complete on the production
+  planner but not yet booked into Sage now show on the order line as
+  "made – awaiting Sage book-in" and count as stock until 7am the next day
+  (the planner's pipeline rule). Special makes tie back to their own order
+  line; stock codes pool by code after free stock.
+
 - v2.4 (11 Nov 2026) – editable Expected date on the embroidery & transfer
   list, set at the production meeting and published to the view-only page
   (`embExp` in data.json) so the sales office can update the Sage promise date.
