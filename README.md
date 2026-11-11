@@ -16,7 +16,10 @@ orders left out.
   cover arrives after it / on an unknown date / not at all (at risk), split
   into **Bought in**, **Made in house** (works order or Clockwork container,
   including codes usually bought from Clockwork that have a works order on)
-  and **Waiting on both**. Tiles filter; each group exports to CSV.
+  and **Waiting on both**. Tiles filter; each group exports to CSV. The late
+  tiles split by what is waited on: production (works order or special make
+  with no WO), suppliers (container or supplier PO, Clockwork included) and
+  POs (supplier purchase orders in Sage only, for the office to chase).
 - **Can jump the queue** – orders that could go out in full by borrowing stock
   held for an order that cannot go out anyway. Shows the lender, what it is
   waiting on and whether the next delivery of the code backfills it in time.
@@ -94,6 +97,10 @@ orders, containers) and nothing else.
 
 ## Changelog
 
+- v2.6 (11 Nov 2026) – a fourth late tile, **late – waiting on POs (office to
+  check)**: late orders with a line waiting on a supplier purchase order in
+  Sage. Clockwork containers and Clockwork POs are left out (they are on the
+  suppliers tile), as are bought-in lines with no PO at all (POtracker's job).
 - v2.5 (11 Nov 2026) – works orders marked complete on the production
   planner but not yet booked into Sage now show on the order line as
   "made – awaiting Sage book-in" and count as stock until 7am the next day
