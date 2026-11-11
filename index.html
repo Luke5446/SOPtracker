@@ -307,7 +307,7 @@ textarea{width:100%;min-height:150px;font-size:11px;font-family:Consolas,monospa
    "Contested": a line only has stock because it is older than another order
    that will go short on the same code.
    ═══════════════════════════════════════════════════════════════════════ */
-const APP_VER='2.5';
+const APP_VER='2.6';
 const LS_RAW='ordertracker_raw', LS_TS='ordertracker_ts', LS_SET='ordertracker_settings', LS_DUE='ordertracker_wodue', LS_EMBX='ordertracker_embexp';
 const DEF_SET={
   made:['Tibard','Oliver Harvey','Clockwork','Clockwork Clothing','Clockwork Giant Clothing'],
@@ -598,6 +598,9 @@ function build(){
     const isSupp=s=>s.t==='cont'||(s.t==='po'&&(!s.via||s.via.sources.some(x=>x.t==='cont'||x.t==='po')));
     o.waitProd=waiting.some(l=>l.sources.some(isProd));
     o.waitSupp=waiting.some(l=>l.sources.some(isSupp));
+    // v2.6: waiting on a supplier purchase order in Sage (not a Clockwork container or Clockwork PO) - the office chases these
+    const isPO=s=>s.t==='po'&&(s.via?s.via.sources.some(x=>x.t==='po'&&!x.po.isCont):!s.po.isCont);
+    o.waitPO=waiting.some(l=>l.sources.some(isPO));
     // v2.2: the morning-meeting lists
     o.prodLines=waiting.filter(l=>l.prodWait);o.needProd=o.prodLines.length>0;
     o.embLines=o.lines.filter(l=>l.out>0&&isEmbCode(l.code));
@@ -911,9 +914,9 @@ function renderRisk(v){
   const late=all.filter(o=>o.status==='late'),risk=all.filter(o=>o.status==='risk');
   const contested=liveOrders().filter(o=>o.contested);
   const special=liveOrders().filter(o=>o.special>0);
-  const lateProd=late.filter(o=>o.waitProd),lateSupp=late.filter(o=>o.waitSupp);
+  const lateProd=late.filter(o=>o.waitProd),lateSupp=late.filter(o=>o.waitSupp),latePO=late.filter(o=>o.waitPO);
   const p10=prod10(),e10=emb10(),AH=SET.ahead||10;
-  const tiles=[['late','red',late.length,'late (promised date passed)'],['lateProd','red',lateProd.length,'late – waiting on production'],['lateSupp','red',lateSupp.length,'late – waiting on suppliers (incl. Clockwork)'],['risk','amber',risk.length,'at risk'],['contested','amber',contested.length,'stock contested'],['soon','steel',liveOrders().filter(o=>o.days!=null&&o.days>=0&&o.days<=SET.soon).length,`due within ${SET.soon} days`],['special','gold',special.length,`special makes (${special.filter(o=>o.specialWait>0).length} still in production)`],
+  const tiles=[['late','red',late.length,'late (promised date passed)'],['lateProd','red',lateProd.length,'late – waiting on production'],['lateSupp','red',lateSupp.length,'late – waiting on suppliers (incl. Clockwork)'],['latePO','red',latePO.length,'late – waiting on POs (office to check)'],['risk','amber',risk.length,'at risk'],['contested','amber',contested.length,'stock contested'],['soon','steel',liveOrders().filter(o=>o.days!=null&&o.days>=0&&o.days<=SET.soon).length,`due within ${SET.soon} days`],['special','gold',special.length,`special makes (${special.filter(o=>o.specialWait>0).length} still in production)`],
     ['prod10','navy',p10.length,`production list – next ${AH} working days + late (${p10.filter(o=>o.status==='late').length})`],['emb10','navy',e10.length,`embroidery &amp; transfer list – next ${AH} working days + late (${e10.filter(o=>o.status==='late').length})`]];
   let h=`<div class="tiles">${tiles.map(t=>`<div class="tile ${t[1]} ${UI.tile===t[0]?'on':''}" onclick="setTile('${t[0]}')"><b>${t[2]}</b><span>${t[3]}</span></div>`).join('')}</div>`;
   if(UI.tile==='prod10'||UI.tile==='emb10'){   // v2.2: one list in date order for the morning meeting
@@ -923,7 +926,7 @@ function renderRisk(v){
     v.innerHTML=h;return;
   }
   let list=all;
-  if(UI.tile==='late')list=late;else if(UI.tile==='lateProd')list=lateProd;else if(UI.tile==='lateSupp')list=lateSupp;else if(UI.tile==='risk')list=risk;else if(UI.tile==='contested')list=contested;else if(UI.tile==='soon')list=liveOrders().filter(o=>o.days!=null&&o.days>=0&&o.days<=SET.soon);else if(UI.tile==='special')list=special;
+  if(UI.tile==='late')list=late;else if(UI.tile==='lateProd')list=lateProd;else if(UI.tile==='lateSupp')list=lateSupp;else if(UI.tile==='latePO')list=latePO;else if(UI.tile==='risk')list=risk;else if(UI.tile==='contested')list=contested;else if(UI.tile==='soon')list=liveOrders().filter(o=>o.days!=null&&o.days>=0&&o.days<=SET.soon);else if(UI.tile==='special')list=special;
   const groups=[['bought','Bought in','Waiting on a supplier PO'],['made','Made in house','Waiting on a works order or a Clockwork container – including codes usually bought from Clockwork that have a works order on'],['both','Waiting on both','Some lines on production, some on a supplier']];
   const none=list.filter(o=>!o.group);
   groups.forEach(g=>{
@@ -938,7 +941,7 @@ function setTile(t){UI.tile=UI.tile===t?'':t;render()}
 function exportCsv(g){
   if(g==='prod10'||g==='emb10')return exportMeetCsv(g);
   const all=riskOrders();
-  let list=all;if(UI.tile==='late')list=all.filter(o=>o.status==='late');else if(UI.tile==='lateProd')list=all.filter(o=>o.status==='late'&&o.waitProd);else if(UI.tile==='lateSupp')list=all.filter(o=>o.status==='late'&&o.waitSupp);else if(UI.tile==='risk')list=all.filter(o=>o.status==='risk');else if(UI.tile==='contested')list=liveOrders().filter(o=>o.contested);else if(UI.tile==='soon')list=liveOrders().filter(o=>o.days!=null&&o.days>=0&&o.days<=SET.soon);else if(UI.tile==='special')list=liveOrders().filter(o=>o.special>0);
+  let list=all;if(UI.tile==='late')list=all.filter(o=>o.status==='late');else if(UI.tile==='lateProd')list=all.filter(o=>o.status==='late'&&o.waitProd);else if(UI.tile==='lateSupp')list=all.filter(o=>o.status==='late'&&o.waitSupp);else if(UI.tile==='latePO')list=all.filter(o=>o.status==='late'&&o.waitPO);else if(UI.tile==='risk')list=all.filter(o=>o.status==='risk');else if(UI.tile==='contested')list=liveOrders().filter(o=>o.contested);else if(UI.tile==='soon')list=liveOrders().filter(o=>o.days!=null&&o.days>=0&&o.days<=SET.soon);else if(UI.tile==='special')list=liveOrders().filter(o=>o.special>0);
   const rows=sortBy(list.filter(o=>o.group===g),'risk-'+g,{k:'days',d:'a'});
   const cell=s=>'"'+String(s==null?'':s).replace(/"/g,'""')+'"';
   const lines=[['Status','Company','SO','Customer','Account','Their ref','Ordered','Promised','Days','Lines to go','Qty to go','Waiting on','Expected','Type'].map(cell).join(',')];
