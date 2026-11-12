@@ -1,5 +1,5 @@
 /* ============================================================================
-   ORDER TRACKER v1 - LIVE SALES ORDERS, PURCHASE ORDERS AND STOCK
+   ORDER TRACKER v2 - LIVE SALES ORDERS, PURCHASE ORDERS, STOCK AND COMMENTS
    Sage 200 Professional, server TIB-SQL-002, both companies (S200_LIVE =
    Tibard, OliverHarveyLive = Oliver Harvey) in one pass.
 
@@ -16,10 +16,16 @@
    extra STK rows only add a few entries to its Stock held tab), but the
    buyer's own query stays the one for POtracker.
 
-   ONE PASTE. Copy columns A to AD, all rows, without the header. Three row
+   ONE PASTE. Copy columns A to AD, all rows, without the header. Four row
    types share one column layout and the app splits them on column A:
 
      SO   one row per product line on a live or held sales order
+     CMT  one row per COMMENT line on those same orders (LineTypeID 3), the
+          text in column E - added 12 Nov 2026 (tracker v2.8) so the order
+          drill-down shows the comments typed on the Sage order. Only the
+          columns A, B, C, E, F, G and AB are filled. POtracker and tracker
+          versions before 2.8 skip the row type, so the paste still works
+          there unchanged.
      PO   one row per live purchase order line with quantity outstanding
      STK  one row per stock code per company, for every code that appears on
           an SO or PO row - the classification and the stock figures
@@ -35,11 +41,12 @@
 
      A  RowType         SO / PO / STK
      B  Company         TIBARD / OLIVER HARVEY
-     C  RowKey          TIB-SO-<lineid>, OH-PO-<lineid>, TIB-STK-<code> ...
+     C  RowKey          TIB-SO-<lineid>, TIB-CMT-<lineid>, OH-PO-<lineid>,
+                        TIB-STK-<code> ...
      D  ProductCode
-     E  Description     SO/PO: line description. STK: stock item name, or
-                        CODE NOT IN STOCK FILE
-     F  DocNo           SO: sales order no. PO: purchase order no
+     E  Description     SO/PO: line description. CMT: the comment text.
+                        STK: stock item name, or CODE NOT IN STOCK FILE
+     F  DocNo           SO/CMT: sales order no. PO: purchase order no
      G  LineSeq         print sequence on the order
      H  AccountNo       SO: customer account. PO: supplier account.
                         STK: preferred supplier account
@@ -69,7 +76,7 @@
      Y  LeadTime        STK: preferred supplier's lead time
      Z  LeadTimeUnitID  STK: unit of Y
      AA MOQ             STK: preferred supplier's minimum order quantity
-     AB DocStatusID     SO/PO: order status. 0 = live, 1 = on hold
+     AB DocStatusID     SO/CMT/PO: order status. 0 = live, 1 = on hold
      AC OrderDate       SO/PO: header DocumentDate (the date the order was
                         raised in Sage), yyyy-mm-dd
      AD EnteredBy       SO/PO: DocumentCreatedBy, the Sage login that raised it
@@ -144,6 +151,10 @@ DECLARE @po TABLE (
     B2BCount nvarchar(10) COLLATE DATABASE_DEFAULT, Intercompany nvarchar(1) COLLATE DATABASE_DEFAULT,
     DocStatusID nvarchar(10) COLLATE DATABASE_DEFAULT, OrderDate nvarchar(10) COLLATE DATABASE_DEFAULT,
     EnteredBy nvarchar(255) COLLATE DATABASE_DEFAULT);
+DECLARE @cmt TABLE (
+    Company nvarchar(20) COLLATE DATABASE_DEFAULT, RowKey nvarchar(60) COLLATE DATABASE_DEFAULT,
+    Description nvarchar(max) COLLATE DATABASE_DEFAULT, DocNo nvarchar(40) COLLATE DATABASE_DEFAULT,
+    LineSeq int, DocStatusID nvarchar(10) COLLATE DATABASE_DEFAULT);
 DECLARE @codes0 TABLE (Company nvarchar(20) COLLATE DATABASE_DEFAULT, ProductCode nvarchar(60) COLLATE DATABASE_DEFAULT,
                        PRIMARY KEY (Company, ProductCode));
 DECLARE @codes  TABLE (Company nvarchar(20) COLLATE DATABASE_DEFAULT, ProductCode nvarchar(60) COLLATE DATABASE_DEFAULT,
@@ -270,6 +281,46 @@ WHERE
         sor.DocumentTypeID   = 0
     AND sor.DocumentStatusID IN (0,1)
     AND sorl.LineTypeID      = 0
+OPTION (RECOMPILE);
+
+/* ------------------------------------------------------------------------
+   2b. CMT rows: the comment lines (LineTypeID 3) on the same live or held
+   sales orders, both companies. Sage keeps the comment text in
+   ItemDescription; tabs and line breaks become spaces so the paste survives
+   Excel. Free text item lines (LineTypeID 1) are not comments and stay out.
+   ------------------------------------------------------------------------ */
+INSERT INTO @cmt (Company, RowKey, Description, DocNo, LineSeq, DocStatusID)
+SELECT
+    'TIBARD',
+    'TIB-CMT-' + CAST(sorl.SOPOrderReturnLineID AS varchar(20)),
+    LTRIM(RTRIM(REPLACE(REPLACE(REPLACE(ISNULL(sorl.ItemDescription,''), CHAR(9),' '), CHAR(13),' '), CHAR(10),' '))),
+    sor.DocumentNo,
+    sorl.PrintSequenceNumber,
+    CAST(sor.DocumentStatusID AS varchar(10))
+FROM        S200_LIVE.dbo.SOPOrderReturn      sor
+INNER JOIN  S200_LIVE.dbo.SOPOrderReturnLine  sorl ON sorl.SOPOrderReturnID = sor.SOPOrderReturnID
+WHERE
+        sor.DocumentTypeID   = 0
+    AND sor.DocumentStatusID IN (0,1)
+    AND sorl.LineTypeID      = 3                  -- comment lines only
+    AND LTRIM(RTRIM(ISNULL(sorl.ItemDescription,''))) <> ''
+
+UNION ALL
+
+SELECT
+    'OLIVER HARVEY',
+    'OH-CMT-' + CAST(sorl.SOPOrderReturnLineID AS varchar(20)),
+    LTRIM(RTRIM(REPLACE(REPLACE(REPLACE(ISNULL(sorl.ItemDescription,''), CHAR(9),' '), CHAR(13),' '), CHAR(10),' '))),
+    sor.DocumentNo,
+    sorl.PrintSequenceNumber,
+    CAST(sor.DocumentStatusID AS varchar(10))
+FROM        OliverHarveyLive.dbo.SOPOrderReturn      sor
+INNER JOIN  OliverHarveyLive.dbo.SOPOrderReturnLine  sorl ON sorl.SOPOrderReturnID = sor.SOPOrderReturnID
+WHERE
+        sor.DocumentTypeID   = 0
+    AND sor.DocumentStatusID IN (0,1)
+    AND sorl.LineTypeID      = 3
+    AND LTRIM(RTRIM(ISNULL(sorl.ItemDescription,''))) <> ''
 OPTION (RECOMPILE);
 
 /* ------------------------------------------------------------------------
@@ -514,7 +565,7 @@ WHERE c.Company = 'OLIVER HARVEY'
 OPTION (RECOMPILE);
 
 /* ------------------------------------------------------------------------
-   7. One shape for all three row types - THE RESULT. Columns a row type does
+   7. One shape for all four row types - THE RESULT. Columns a row type does
    not use are blank (text) or NULL (numbers); both paste as an empty cell.
    ------------------------------------------------------------------------ */
 SELECT  RowType, Company, RowKey, ProductCode, Description, DocNo, LineSeq,
@@ -531,6 +582,13 @@ FROM (
            CAST(NULL AS decimal(18,2)) AS MOQ, DocStatusID, OrderDate, EnteredBy
     FROM   @so
     UNION ALL
+    SELECT 'CMT', Company, RowKey, '' AS ProductCode, Description, DocNo, LineSeq,
+           '' AS AccountNo, '' AS AccountName, '' AS Reference, '' AS DateISO,
+           CAST(NULL AS decimal(18,2)), CAST(NULL AS decimal(18,2)), CAST(NULL AS decimal(18,2)), CAST(NULL AS decimal(18,2)),
+           '' AS FulfilMethodID, '' AS LinkID, '' AS B2BCount, '' AS Intercompany,
+           '', '', '', '', '', '', '', CAST(NULL AS decimal(18,2)), DocStatusID, '' AS OrderDate, '' AS EnteredBy
+    FROM   @cmt
+    UNION ALL
     SELECT 'PO', Company, RowKey, ProductCode, Description, DocNo, LineSeq,
            AccountNo, AccountName, Reference, DateISO, Qty1, Qty2, Qty3, Qty4,
            FulfilMethodID, LinkID, B2BCount, Intercompany,
@@ -544,6 +602,6 @@ FROM (
            BOMItemTypeID, LeadTime, LeadTimeUnitID, MOQ, '' AS DocStatusID, '' AS OrderDate, '' AS EnteredBy
     FROM   @stk
 ) allrows
-ORDER BY CASE RowType WHEN 'SO' THEN 1 WHEN 'PO' THEN 2 ELSE 3 END,
+ORDER BY CASE RowType WHEN 'SO' THEN 1 WHEN 'CMT' THEN 2 WHEN 'PO' THEN 3 ELSE 4 END,
          Company, ProductCode, DocNo, LineSeq
 OPTION (RECOMPILE);

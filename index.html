@@ -61,6 +61,7 @@ main{max-width:1320px;margin:0 auto;padding:16px 16px 60px}
 .card{background:var(--card);border:1px solid var(--line);border-radius:10px;margin-top:14px;box-shadow:0 1px 3px rgba(20,30,50,.06);overflow:hidden}
 .card h2{font-size:14px;padding:11px 16px;border-bottom:1px solid var(--line);color:var(--navy);display:flex;align-items:center;gap:10px;flex-wrap:wrap}
 .card h2 .r{margin-left:auto;font-size:12px;font-weight:400;color:var(--mut)}
+.cmts{padding:10px 16px;border-top:1px solid var(--line);background:#fffdf5} .cmts .lab{font-size:10.5px;color:var(--mut);text-transform:uppercase;letter-spacing:.4px;font-weight:600;margin-bottom:4px} .cmts .cmt{display:flex;gap:10px;font-size:13px;padding:3px 0;white-space:pre-wrap} .cmts .cmt .num{color:var(--mut);min-width:18px;text-align:right;font-size:12px}
 .card .note{padding:10px 16px;font-size:12.5px;color:var(--mut);border-bottom:1px solid var(--line);background:#fafbfd;line-height:1.45}
 .tw{overflow-x:auto}
 table{width:100%;border-collapse:collapse;font-size:13px}
@@ -307,7 +308,7 @@ textarea{width:100%;min-height:150px;font-size:11px;font-family:Consolas,monospa
    "Contested": a line only has stock because it is older than another order
    that will go short on the same code.
    ═══════════════════════════════════════════════════════════════════════ */
-const APP_VER='2.7';
+const APP_VER='2.8';
 const LS_RAW='ordertracker_raw', LS_TS='ordertracker_ts', LS_SET='ordertracker_settings', LS_DUE='ordertracker_wodue', LS_EMBX='ordertracker_embexp';
 const DEF_SET={
   made:['Tibard','Oliver Harvey','Clockwork','Clockwork Clothing','Clockwork Giant Clothing'],
@@ -315,7 +316,7 @@ const DEF_SET={
 };
 const CLOCKWORK_ACCTS=['CLO003'];
 let SET=loadSettings();
-let DATA={so:[],po:[],stk:[],ts:null};
+let DATA={so:[],po:[],stk:[],cmt:[],ts:null};
 let RAW='';                     // the paste as loaded (blank rows dropped); what Publish sends
 let ORDERS=[];                 // one per company + SO number
 let ORD_IDX=new Map();         // co|doc -> order
@@ -357,12 +358,14 @@ function nextWorkDay(d,n){let x=new Date(d);n=n||1;while(n>0){x=addDays(x,1);if(
 
 /* ── parse the paste ───────────────────────────────────────────────────── */
 function parseRaw(txt){
-  const so=[],po=[],stk=[];let bad=0;
+  const so=[],po=[],stk=[],cmt=[];let bad=0;
   txt.replace(/\r/g,'').split('\n').forEach(line=>{
     if(!line.trim())return;
     const c=line.split('\t').map(x=>{x=x.trim();if(x.length>1&&x[0]==='"'&&x[x.length-1]==='"')x=x.slice(1,-1).replace(/""/g,'"');return x.trim()});
     if(c[0]==='RowType')return;
-    if(!/^(SO|PO|STK)$/.test(c[0])||c.length<20){bad++;return}
+    if(!/^(SO|CMT|PO|STK)$/.test(c[0])||c.length<20){bad++;return}
+    // v2.8: CMT = a comment line typed on the Sage order (text in column E); shown under the lines on the order card
+    if(c[0]==='CMT'){if(c[4])cmt.push({key:c[2],co:c[1],doc:c[5],seq:num(c[6]),text:c[4]});return}
     const base={key:c[2],co:c[1],code:c[3].toUpperCase(),desc:c[4],doc:c[5],seq:num(c[6]),acct:c[7],acctName:c[8],ref:c[9],
       date:c[10]||'',q1:num(c[11]),q2:num(c[12]),q3:num(c[13]),q4:c[14]===''?null:num(c[14]),fulfil:c[15],link:c[16]||'',b2bN:num(c[17]),
       ic:c[18]==='Y',status:c[27]||'0',added:c[28]||'',user:c[29]||''};
@@ -372,7 +375,7 @@ function parseRaw(txt){
       inStock:num(c[11]),alloc:num(c[12]),free:num(c[13]),onPO:num(c[14]),fulfil:c[15],b2bHist:num(c[17]),
       mfr:c[19],stockHeld:c[20]==='Yes',web:c[21]==='Yes',grp:c[22],bom:c[23],lead:c[24]===''?null:num(c[24]),leadUnit:c[25],moq:num(c[26]),missing:c[4]==='CODE NOT IN STOCK FILE'});
   });
-  return {so,po,stk,bad};
+  return {so,po,stk,cmt,bad};
 }
 
 /* ── the other apps' published data ────────────────────────────────────── */
@@ -463,6 +466,10 @@ function build(){
     o.lines.push(ln);LINES.push(ln);
   });
   ORDERS.forEach(o=>o.lines.sort((a,b)=>a.seq-b.seq));
+  // v2.8: Sage comment lines, attached to their order by company + SO number (an order with only comment lines has no product lines and is not an order here)
+  ORDERS.forEach(o=>o.notes=[]);
+  (DATA.cmt||[]).forEach(c=>{const o=ORD_IDX.get(c.co+'|'+soNo(c.doc));if(o)o.notes.push(c)});
+  ORDERS.forEach(o=>o.notes.sort((a,b)=>a.seq-b.seq));
 
   // ── pools: who gets the stock, works orders, containers and POs ──
   const poolKey=ln=>(ln.made&&SET.share?'ALL':ln.co)+'|'+ln.base;
@@ -806,7 +813,7 @@ function orderCard(o){
   }
   const prog=o.ordQty?Math.round(o.despQty/o.ordQty*100):0;
   let h=`<div class="card">
-    <h2>${coTag(o.co)} <span style="font-size:18px">SO ${esc(o.doc)}</span> ${pill(o.status)}${o.hold?' <span class="pill p-grey">On hold</span>':''}${o.group?' '+groupPill(o.group):''}${o.special?' <span class="pill p-gold">Special make</span>':''}<span class="r">${o.user?'raised by '+esc(o.user)+' · ':''}${prog}% despatched</span></h2>
+    <h2>${coTag(o.co)} <span style="font-size:18px">SO ${esc(o.doc)}</span> ${pill(o.status)}${o.hold?' <span class="pill p-grey">On hold</span>':''}${o.group?' '+groupPill(o.group):''}${o.special?' <span class="pill p-gold">Special make</span>':''}${o.notes&&o.notes.length?' <span class="pill p-grey" title="Comment lines on the Sage order – see below the lines">&#128172; '+o.notes.length+'</span>':''}<span class="r">${o.user?'raised by '+esc(o.user)+' · ':''}${prog}% despatched</span></h2>
     <div class="ord-head">
       <div><div class="lab">Customer</div><div class="val">${esc(custName(o))}<span class="sm">${esc(o.acct)}${custName(o)!==o.acctName?' · '+esc(o.acctName):''}</span></div></div>
       <div><div class="lab">Their order ref</div><div class="val">${esc(o.ref)||'–'}</div></div>
@@ -822,7 +829,9 @@ function orderCard(o){
     h+=`<tr class="row" onclick="toggleLine('${esc(ln.key)}')"><td class="num">${ln.seq||''}</td><td><span class="code">${esc(ln.code)}</span>${ln.special?' <span class="pill p-gold" title="Made in house, not a stock-held code">SM</span>':''}<div class="desc">${esc(ln.desc)}</div></td><td class="num">${fmt(ln.q1)}</td><td class="num">${fmt(ln.q2)}</td><td class="num"><b>${fmt(ln.out)}</b></td><td>${lineWhere(ln)}</td><td>${expCell(ln)}</td><td>${pill(ln.status)}</td></tr>`;
     if(open)h+=`<tr class="det"><td colspan="8">${lineDetail(ln)}</td></tr>`;
   });
-  h+=`</tbody></table></div><div class="note">Click a line to see every live order that wants the same code, in the order the stock goes out. Dates: works order due date; container landing day + 1 working day; PO requested date. “Not on order” means no stock, works order, container or PO covers it.</div></div>`;
+  h+=`</tbody></table></div>`;
+  if(o.notes&&o.notes.length)h+=`<div class="cmts"><div class="lab">Comment lines on the Sage order</div>${o.notes.map(n=>`<div class="cmt"><span class="num">${n.seq||''}</span><span>${esc(n.text)}</span></div>`).join('')}</div>`;
+  h+=`<div class="note">Click a line to see every live order that wants the same code, in the order the stock goes out. Dates: works order due date; container landing day + 1 working day; PO requested date. “Not on order” means no stock, works order, container or PO covers it.</div></div>`;
   return h;
 }
 function toggleLine(k){UI.openLine[k]=!UI.openLine[k];render()}
@@ -986,7 +995,7 @@ function renderAll(v){
 function renderData(v){
   const t=DATA.ts?fdt(DATA.ts):'–';
   v.innerHTML=`<div class="card"><h2>Where the data comes from</h2><div class="note">
-  <b>Sage</b> (sales orders, purchase orders, stock): pasted ${t}${DATA.pubAt?' · published '+fdt(DATA.pubAt):''} · ${DATA.so.length} SO lines, ${DATA.po.length} PO lines, ${DATA.stk.length} stock rows.<br>
+  <b>Sage</b> (sales orders, purchase orders, stock): pasted ${t}${DATA.pubAt?' · published '+fdt(DATA.pubAt):''} · ${DATA.so.length} SO lines, ${(DATA.cmt||[]).length} comment lines, ${DATA.po.length} PO lines, ${DATA.stk.length} stock rows.<br>
   <b>Works orders</b>: production planner, ${PP.ok?'published '+fdt(PP.savedAt)+' · '+PP.wos.length+' live works orders · '+(PP.pipe.reduce((x,c)=>x+c.qty,0)+[...PP.smPipe.values()].reduce((x,a)=>x+a.reduce((y,c)=>y+c.qty,0),0))+' units completed, awaiting Sage book-in (pipeline until 7am next day) · SOP demand pasted '+fdt(PP.sopAt):'<span style="color:var(--red)">not read ('+esc(PP.err)+')</span>'}.<br>
   <b>Containers</b>: stock planner, ${SP.ok?'published '+fdt(SP.savedAt)+' · '+SP.cPOs.map(c=>esc(c.ref)+' lands '+fd(pd(c.date))).join(', ')+(SP.nextContDate?' · next order date '+fd(pd(SP.nextContDate)):''):'<span style="color:var(--red)">not read ('+esc(SP.err)+')</span>'}.<br><br>
   <b>Who gets the stock</b>: Sage allocation first, then free stock to the oldest promised date, then units already made on a completed works order but not yet booked into Sage (the planner's pipeline, until 7am the next day), then a special-make works order raised for the line, the back-to-back PO Sage generated from the order, live works orders (oldest raised first), containers in landing order, and purchase orders by date. Made-in-house codes${SET.share?' share Tibard, BULK and OH stock as one pool':' are per company'}; bought-in codes are per company. Held orders ${SET.holdSO?'count as':'do not take'} demand.<br><br>
@@ -1012,7 +1021,7 @@ function loadPaste(){
   m.className='msg ok';m.textContent='';
   if(!kept)alert('Loaded '+r.so.length+' sales order lines, but the paste is too big for this browser to keep between sessions.\n\nPublish for team now; the published copy is what everyone (and this PC, next time) will read.');
 }
-function applyRaw(raw,ts,pubAt){RAW=raw||'';const r=parseRaw(raw);DATA={so:r.so,po:r.po,stk:r.stk,ts:ts||null,bad:r.bad,pubAt:pubAt||null};build();render()}
+function applyRaw(raw,ts,pubAt){RAW=raw||'';const r=parseRaw(raw);DATA={so:r.so,po:r.po,stk:r.stk,cmt:r.cmt,ts:ts||null,bad:r.bad,pubAt:pubAt||null};build();render()}
 function openSettings(){
   document.getElementById('sMade').value=SET.made.join('\n');document.getElementById('sGroups').value=SET.groups.join(', ');
   document.getElementById('sShare').checked=!!SET.share;document.getElementById('sHoldSO').checked=!!SET.holdSO;document.getElementById('sSoon').value=SET.soon;
@@ -1024,7 +1033,7 @@ function saveSettings(){
   SET.share=document.getElementById('sShare').checked;SET.holdSO=document.getElementById('sHoldSO').checked;SET.soon=Math.max(0,num(document.getElementById('sSoon').value));
   lsSet(LS_SET,SET);build();render();closeOv('setOv');
 }
-function clearSaved(){if(!confirm('Forget the data pasted on this PC and reload what was last published?'))return;try{localStorage.removeItem(LS_RAW);localStorage.removeItem(LS_TS)}catch(e){}RAW='';DATA={so:[],po:[],stk:[],ts:null};build();render();closeOv('setOv');fetchShared()}
+function clearSaved(){if(!confirm('Forget the data pasted on this PC and reload what was last published?'))return;try{localStorage.removeItem(LS_RAW);localStorage.removeItem(LS_TS)}catch(e){}RAW='';DATA={so:[],po:[],stk:[],cmt:[],ts:null};build();render();closeOv('setOv');fetchShared()}
 function applyMode(){const badge=document.getElementById('modeBadge');if(IS_EDITOR){badge.textContent='EDITOR';badge.style.background='#065f46'}else{badge.textContent='VIEW ONLY';document.body.classList.add('viewer-mode')}}
 
 /* ── works order due dates (v2.0) ──────────────────────────────────────────
@@ -1174,7 +1183,7 @@ function publishTeam(){
   const raw=RAW||'';
   const nd=Object.keys(DUE).length;
   if(!raw||!DATA.so.length){if(nd){publishDueOnly();return}alert('Paste today\'s data first'+(embXPending()?' (the expected dates are published with it)':'')+'.');return}
-  const state={app:'ordertracker',ver:APP_VER,raw,ts:DATA.ts||new Date().toISOString(),settings:SET,embExp:EMBX,so:DATA.so.length,po:DATA.po.length,stk:DATA.stk.length,savedAt:new Date().toISOString()};
+  const state={app:'ordertracker',ver:APP_VER,raw,ts:DATA.ts||new Date().toISOString(),settings:SET,embExp:EMBX,so:DATA.so.length,cmt:(DATA.cmt||[]).length,po:DATA.po.length,stk:DATA.stk.length,savedAt:new Date().toISOString()};
   const json=JSON.stringify(state),tok=pubToken();
   if(!tok){pubNoToken();return}
   const pb=document.getElementById('pubBtn'),was=pb.innerHTML;
