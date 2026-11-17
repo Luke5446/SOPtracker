@@ -1,0 +1,259 @@
+{
+ "_about": "Customers that cannot take part despatches (Sage 200 'No part despatches' customer flag). One entry per Sage account; co = Tibard, Oliver Harvey, or blank for either company. The order tracker highlights these customers' orders and counts them on the Can't part ship tile. Kept on file for the future WMS. Update from the tracker's ?edit page (Can't part ship list) or edit this file directly.",
+ "source": "Sage 200 report 'Customer No Part Despatches List' (NoPartDespatches = True)",
+ "updated": "2026-11-17",
+ "customers": [
+  {
+   "co": "Tibard",
+   "acct": "BAN002",
+   "name": "Big Table - Banana Tree Restaurants Ltd",
+   "group": "Big Table"
+  },
+  {
+   "co": "Tibard",
+   "acct": "BIGBI001",
+   "name": "Big Table Group - Bella Italia",
+   "group": "Big Table"
+  },
+  {
+   "co": "Tibard",
+   "acct": "BIGLI001",
+   "name": "Big Table Group - Las Iguanas",
+   "group": "Big Table"
+  },
+  {
+   "co": "Tibard",
+   "acct": "BIGCCDS1",
+   "name": "Big Table Group - Coast to Coast - DS",
+   "group": "Big Table"
+  },
+  {
+   "co": "Tibard",
+   "acct": "BIGCHDS1",
+   "name": "Big Table Group - Chiquitos - DS",
+   "group": "Big Table"
+  },
+  {
+   "co": "Tibard",
+   "acct": "BIGCR001",
+   "name": "Big Table Group - Cafe Rouge",
+   "group": "Big Table"
+  },
+  {
+   "co": "Tibard",
+   "acct": "BIGESDS1",
+   "name": "Big Table Group - Est Est Est - DS",
+   "group": "Big Table"
+  },
+  {
+   "co": "Tibard",
+   "acct": "BIGFBDS1",
+   "name": "Big Table Group - Frankie and Benny's - DS",
+   "group": "Big Table"
+  },
+  {
+   "co": "Tibard",
+   "acct": "BIGFIDS1",
+   "name": "Big Table Group - Filling Station - DS",
+   "group": "Big Table"
+  },
+  {
+   "co": "Tibard",
+   "acct": "BIGFJDS1",
+   "name": "Big Table Group - FireJacks - DS",
+   "group": "Big Table"
+  },
+  {
+   "co": "Tibard",
+   "acct": "BIGGADS1",
+   "name": "Big Table Group - Garfunkels - DS",
+   "group": "Big Table"
+  },
+  {
+   "co": "Tibard",
+   "acct": "BIGHO001",
+   "name": "Big Table Group - Head Office",
+   "group": "Big Table"
+  },
+  {
+   "co": "Tibard",
+   "acct": "BIGST001",
+   "name": "Big Table Group - Strada",
+   "group": "Big Table"
+  },
+  {
+   "co": "Tibard",
+   "acct": "TRGBADS1",
+   "name": "Barburrito Group Ltd - Direct Sale",
+   "group": "TRG"
+  },
+  {
+   "co": "Tibard",
+   "acct": "TRGBPDS1",
+   "name": "Brunning and Price Ltd - Direct Sale",
+   "group": "TRG"
+  },
+  {
+   "co": "Tibard",
+   "acct": "TRGCODS1",
+   "name": "Areas UK F&B Concessions Ltd -  Direct Sale",
+   "group": "TRG"
+  },
+  {
+   "co": "Tibard",
+   "acct": "TRGHODS1",
+   "name": "Areas UK F&B Concessions Ltd - Head Office - Direct Sale",
+   "group": "TRG"
+  },
+  {
+   "co": "Tibard",
+   "acct": "CHC001A",
+   "name": "CH & Co Catering Ltd - Main sites Food Buy",
+   "group": "CH&CO"
+  },
+  {
+   "co": "Tibard",
+   "acct": "CHC001B",
+   "name": "Company of Cooks Ltd - Foodbuy",
+   "group": "CH&CO"
+  },
+  {
+   "co": "Tibard",
+   "acct": "CHC001C",
+   "name": "Inspire Catering Scotland LLP - Foodbuy",
+   "group": "CH&CO"
+  },
+  {
+   "co": "Tibard",
+   "acct": "CHC001D",
+   "name": "Vacherin Ltd - Foodbuy",
+   "group": "CH&CO"
+  },
+  {
+   "co": "Tibard",
+   "acct": "GATFB001",
+   "name": "Gather and Gather Ltd - Foodbuy",
+   "group": "CH&CO"
+  },
+  {
+   "co": "Tibard",
+   "acct": "HCMVAC01",
+   "name": "Vacherin Ltd",
+   "group": "CH&CO"
+  },
+  {
+   "co": "Tibard",
+   "acct": "HCMCOC01",
+   "name": "Company of Cooks Ltd",
+   "group": "CH&CO"
+  },
+  {
+   "co": "Tibard",
+   "acct": "HCMINS01",
+   "name": "Inspire Catering Scotland LLP",
+   "group": "CH&CO"
+  },
+  {
+   "co": "Tibard",
+   "acct": "HCMABS01",
+   "name": "Absolutely Catering Ltd",
+   "group": "CH&CO"
+  },
+  {
+   "co": "Tibard",
+   "acct": "HCMCHC01",
+   "name": "CH & Co Catering Ltd - Head Office Brands",
+   "group": "CH&CO"
+  },
+  {
+   "co": "Tibard",
+   "acct": "GATHO01",
+   "name": "Gather and Gather Ltd",
+   "group": "CH&CO"
+  },
+  {
+   "co": "Tibard",
+   "acct": "EFO001",
+   "name": "E-Foods Ltd",
+   "group": "E-Foods"
+  },
+  {
+   "co": "Tibard",
+   "acct": "EFOYHA01",
+   "name": "E-Foods Ltd as Agent for YHA England & Wales",
+   "group": "E-Foods"
+  },
+  {
+   "co": "Tibard",
+   "acct": "EFOADV01",
+   "name": "E-Foods Ltd as Agent for Advinia",
+   "group": "E-Foods"
+  },
+  {
+   "co": "Tibard",
+   "acct": "EFOKIN01",
+   "name": "E-Foods Ltd - Kingswood Learning & Leisure",
+   "group": "E-Foods"
+  },
+  {
+   "co": "Tibard",
+   "acct": "EFOES01",
+   "name": "E-Foods Ltd as Agent for Essex County Council",
+   "group": "E-Foods"
+  },
+  {
+   "co": "Tibard",
+   "acct": "BOOMP001",
+   "name": "Booker Limited - Marketplace Online Sales",
+   "group": "Booker"
+  },
+  {
+   "co": "Tibard",
+   "acct": "GUS001",
+   "name": "Gusto Restaurants",
+   "group": "Cherry Equity Three Ltd"
+  },
+  {
+   "co": "Tibard",
+   "acct": "SEN001",
+   "name": "Sentinel Procurement Solutions Ltd",
+   "group": ""
+  },
+  {
+   "co": "Tibard",
+   "acct": "FRA001",
+   "name": "Thomas Franks Ltd",
+   "group": "Thomas Franks"
+  },
+  {
+   "co": "Tibard",
+   "acct": "LVNEW02",
+   "name": "New World Trading Co (UK) Ltd",
+   "group": ""
+  },
+  {
+   "co": "Tibard",
+   "acct": "BOUMC001",
+   "name": "Bourne Leisure Group Ltd - Millies Cookies",
+   "group": "Bourne Leisure"
+  },
+  {
+   "co": "Tibard",
+   "acct": "BOUHO001",
+   "name": "Bourne Leisure Ltd - Head Office",
+   "group": "Bourne Leisure"
+  },
+  {
+   "co": "Tibard",
+   "acct": "FRA002",
+   "name": "Thomas Franks London Ltd",
+   "group": "Thomas Franks"
+  },
+  {
+   "co": "Tibard",
+   "acct": "DOU008",
+   "name": "Doubletree by Hilton Southampton",
+   "group": ""
+  }
+ ]
+}
