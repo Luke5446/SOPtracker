@@ -31,8 +31,8 @@ orders left out.
 ## Data
 
 1. **Sage** – `ordertracker_live.sql` (the POtracker query with every product
-   line on a live order and the stock row for each code in both companies plus
-   its BULK item). The sales manager refreshes the Excel query, copies columns
+   line on a live order, the comment lines on those orders, and the stock row
+   for each code in both companies plus its BULK item). The sales manager refreshes the Excel query, copies columns
    A to AD, opens the page with `?edit`, presses **Paste today's data** and
    then **Publish for team**. Everyone else opens the plain address.
 2. **Works orders** – the production planner's published `data.json`
@@ -98,6 +98,10 @@ orders, containers) and nothing else.
 
 ## Changelog
 
+- v2.8 (12 Nov 2026) – comment lines typed on the Sage order show under the
+  item lines on the order card (a 💬 count sits in the card heading). The
+  query gains a fourth row type, **CMT** (comment lines, LineTypeID 3, text
+  in column E); the A–AD layout is unchanged and older pastes still load.
 - v2.7 (11 Nov 2026) – the v2.6 POs tile is replaced by **bought in – no PO
   raised (late or at risk)**: late or at-risk orders with a bought-in line
   that has nothing on order, from the daily paste as it is. The suppliers
