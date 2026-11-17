@@ -90,6 +90,27 @@ view-only page shows them and the sales office can put the date on the Sage
 order as the new promise date. "Remove date" brings the worked-out date back.
 Dates for orders that are no longer live are dropped on the next load.
 
+### Customers that can't part ship (v2.9)
+
+Sage 200 carries a per-customer **No part despatches** flag. The customers
+with it set are kept in `no-part-ship.json` (one entry per Sage account:
+`co`, `acct`, `name`, `group`; `co` blank means either company), read when
+the page opens. Their orders show a red **⛔ No part ship** pill and a light
+red row on every list and on the order card, and the **can't part ship**
+tile on Late & at risk lists every live order for them (late count and
+how many are still waiting on something). The CSV exports gain a
+**Part ship** column. The file is the record for the future WMS.
+
+To update it, in `?edit` press **Can't part ship list**, paste the Sage
+report (Customer No Part Despatches List, as it comes) or edit the lines
+(account, name, group, company – tab separated) and Save. The whole list is
+replaced and written straight into the repo with the publishing token
+(downloaded for upload when there is no token). Until GitHub takes it the
+list stays on that PC (`ordertracker_nops`). The file can also be edited by
+hand in GitHub. The flag is not in `ordertracker_live.sql` yet; once the
+Sage column holding it is confirmed it could ride along with the daily
+paste instead.
+
 ## Later
 
 Built so the Sage paste can be swapped for a live Sage link when the apps move
@@ -98,6 +119,11 @@ orders, containers) and nothing else.
 
 ## Changelog
 
+- v2.9 (17 Nov 2026) – customers that cannot take part despatches (Sage
+  flag, 42 accounts from the Sage report) are listed in `no-part-ship.json`;
+  their orders get a ⛔ No part ship pill and light red rows everywhere, a
+  **can't part ship** tile on Late & at risk, a sentence on the order card
+  and a Part ship column in the CSVs. Editor button to replace the list.
 - v2.8 (12 Nov 2026) – comment lines typed on the Sage order show under the
   item lines on the order card (a 💬 count sits in the card heading). The
   query gains a fourth row type, **CMT** (comment lines, LineTypeID 3, text

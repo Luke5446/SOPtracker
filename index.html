@@ -71,6 +71,8 @@ th.s::after{content:' ▲';font-size:9px;color:var(--steel)} th.sd::after{conten
 td{padding:8px 10px;border-bottom:1px solid #eef1f6;vertical-align:top}
 tbody tr.row{cursor:pointer}
 tbody tr.row:hover{background:#f2f6fc}
+/* v2.9: orders for customers that cannot take part despatches */
+tbody tr.row.nps{background:#fdeeee} tbody tr.row.nps:hover{background:#f9dede} .p-nps{background:var(--red-bg);color:#b91c1c;border:1px solid #f5b5b5}
 td.num,th.num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
 .code{font-family:Consolas,monospace;font-weight:700;color:var(--navy);font-size:12.5px;white-space:nowrap}
 td .desc{font-size:12px;color:var(--mut);margin-top:2px;max-width:360px}
@@ -175,6 +177,7 @@ textarea{width:100%;min-height:150px;font-size:11px;font-family:Consolas,monospa
   <button class="btn btn-gold edit-only" id="pasteBtn" onclick="openPaste()">Paste today's data</button>
   <button class="btn btn-green edit-only" id="pubBtn" onclick="publishTeam()">&#128228; Publish for team</button>
   <button class="btn btn-ghost edit-only" id="pubSetupBtn" onclick="pubSetup()" title="A GitHub token on this PC lets Publish put data.json straight into the repo">&#9881; Set up this PC</button>
+  <button class="btn btn-ghost edit-only" id="npsBtn" onclick="openNps()" title="Customers that cannot take part despatches (Sage flag) – kept in no-part-ship.json">&#9940; Can't part ship list</button>
   <button class="btn btn-ghost edit-only" id="setBtn" onclick="openSettings()">Settings</button>
 </header>
 
@@ -213,6 +216,23 @@ textarea{width:100%;min-height:150px;font-size:11px;font-family:Consolas,monospa
       <button class="btn btn-navy" onclick="loadPaste()">Load data</button>
       <button class="btn btn-line" onclick="closeOv('pasteOv')">Cancel</button>
       <span class="msg" id="pasteMsg"></span>
+    </div>
+  </div>
+</div>
+
+<!-- Can't part ship list modal (v2.9) -->
+<div class="ov" id="npsOv">
+  <div class="md">
+    <h3>Customers that can't part ship <button class="x" onclick="closeOv('npsOv')" aria-label="Close">×</button></h3>
+    <div class="body">
+      <p>One customer per line: <b>account</b>, <b>name</b>, <b>group</b>, <b>company</b> (Tibard, Oliver Harvey, or blank for either), separated by tabs. The Sage report <b>Customer No Part Despatches List</b> can be pasted as it is (CustomerGroup, account, name, NoPartDespatches): rows marked True are kept. Saving replaces the whole list and writes <b>no-part-ship.json</b> into the repo, so the team sees it within a minute.</p>
+      <textarea id="npsTa" placeholder="BAN002&#9;Big Table - Banana Tree Restaurants Ltd&#9;Big Table&#9;Tibard" spellcheck="false"></textarea>
+      <div class="h" id="npsInfo"></div>
+    </div>
+    <div class="foot">
+      <button class="btn btn-navy" onclick="saveNps()">Save list</button>
+      <button class="btn btn-line" onclick="closeOv('npsOv')">Cancel</button>
+      <span class="msg" id="npsMsg"></span>
     </div>
   </div>
 </div>
@@ -308,7 +328,7 @@ textarea{width:100%;min-height:150px;font-size:11px;font-family:Consolas,monospa
    "Contested": a line only has stock because it is older than another order
    that will go short on the same code.
    ═══════════════════════════════════════════════════════════════════════ */
-const APP_VER='2.8';
+const APP_VER='2.9';
 const LS_RAW='ordertracker_raw', LS_TS='ordertracker_ts', LS_SET='ordertracker_settings', LS_DUE='ordertracker_wodue', LS_EMBX='ordertracker_embexp';
 const DEF_SET={
   made:['Tibard','Oliver Harvey','Clockwork','Clockwork Clothing','Clockwork Giant Clothing'],
@@ -386,6 +406,60 @@ let PP={ok:false,err:'',wos:[],codes:new Set(),smPending:new Map(),savedAt:'',so
 // same rule the planner uses (Sage's overnight routine and the next paste are assumed to carry it by then)
 const pipeActive=completed=>{if(!completed)return false;const d=new Date(completed+'T00:00:00');if(isNaN(d))return false;d.setDate(d.getDate()+1);d.setHours(7,0,0,0);return new Date()<d};
 let SP={ok:false,err:'',cPOs:[],codes:new Set(),nextContDate:'',savedAt:''};
+/* ── v2.9: customers that cannot take part despatches ────────────────────
+   Sage 200 has a per-customer "No part despatches" flag. The list is kept
+   in no-part-ship.json in this repo (one entry per Sage account: co, acct,
+   name, group) so it is on file for the WMS, read when the page opens. The
+   editor's "Can't part ship list" button replaces it and writes the file
+   back through the GitHub contents API with the publishing token. */
+const NPS_URL='no-part-ship.json', NPS_API='https://api.github.com/repos/Luke5446/SOPtracker/contents/no-part-ship.json', LS_NPS='ordertracker_nops';
+let NPS={ok:false,err:'',updated:'',source:'',customers:[],idx:new Set(),local:false};
+const npsKey=(co,acct)=>(String(co||'').trim().toUpperCase())+'|'+String(acct||'').trim().toUpperCase();
+function npsIndex(){NPS.idx=new Set(NPS.customers.map(c=>npsKey(c.co,c.acct)))}
+function noPartShip(o){return !!o.acct&&(NPS.idx.has(npsKey(o.co,o.acct))||NPS.idx.has(npsKey('',o.acct)))}
+function npsApply(j,local){NPS.ok=true;NPS.err='';NPS.updated=j.updated||'';NPS.source=j.source||'';NPS.local=!!local;
+  NPS.customers=(j.customers||[]).map(c=>({co:String(c.co||'').trim(),acct:String(c.acct||'').trim().toUpperCase(),name:String(c.name||'').trim(),group:String(c.group||'').trim()})).filter(c=>c.acct);npsIndex()}
+function fetchNPS(){
+  fetch(NPS_URL+'?t='+Date.now()).then(r=>{if(!r.ok)throw new Error('HTTP '+r.status);return r.json()}).then(j=>{
+    const loc=IS_EDITOR?lsGet(LS_NPS,null):null;   // a list saved on this PC that GitHub did not take yet stays in front
+    if(loc&&loc.customers&&(loc.updated||'')>(j.updated||''))npsApply(loc,true);else{npsApply(j,false);if(loc)try{localStorage.removeItem(LS_NPS)}catch(e){}}
+    if(DATA.so.length){build();render()}
+  }).catch(e=>{NPS.ok=false;NPS.err=String(e.message||e);const loc=IS_EDITOR?lsGet(LS_NPS,null):null;if(loc&&loc.customers){npsApply(loc,true);if(DATA.so.length){build();render()}}});
+}
+// editor: paste the list (or the Sage report) and write no-part-ship.json back to the repo
+function parseNps(txt){
+  const out=[];String(txt||'').replace(/\r/g,'').split('\n').forEach(l=>{if(!l.trim())return;const c=l.split('\t').map(x=>x.trim());
+    if(/^(CustomerGroup|Account|Acct)$/i.test(c[0])&&!/^[A-Z0-9]{3,}$/.test(c[1]||''))return;   // header row
+    const last=(c[c.length-1]||'').toLowerCase();
+    if(c.length>=4&&(last==='true'||last==='false')){if(last==='true')out.push({co:'Tibard',acct:(c[1]||'').toUpperCase(),name:c[2]||'',group:c[0]||''});return}   // Sage report layout
+    if(c[0])out.push({acct:c[0].toUpperCase(),name:c[1]||'',group:c[2]||'',co:c[3]||''});});
+  const seen=new Set();return out.filter(c=>c.acct&&!seen.has(npsKey(c.co,c.acct))&&seen.add(npsKey(c.co,c.acct)));
+}
+function openNps(){if(!IS_EDITOR)return;
+  document.getElementById('npsTa').value=NPS.customers.map(c=>[c.acct,c.name,c.group,c.co].join('\t')).join('\n');
+  document.getElementById('npsInfo').textContent=(NPS.customers.length+' customers on the list'+(NPS.updated?' · last updated '+NPS.updated:'')+(NPS.local?' · saved on this PC, not yet written to GitHub':''));
+  document.getElementById('npsMsg').textContent='';document.getElementById('npsOv').classList.add('show');document.getElementById('npsTa').focus()}
+function saveNps(){
+  const list=parseNps(document.getElementById('npsTa').value),m=document.getElementById('npsMsg');
+  if(!list.length&&!confirm('The list is empty – save it anyway? No order will be flagged.'))return;
+  const j={_about:"Customers that cannot take part despatches (Sage 200 'No part despatches' customer flag). One entry per Sage account; co = Tibard, Oliver Harvey, or blank for either company. The order tracker highlights these customers' orders and counts them on the Can't part ship tile. Kept on file for the future WMS. Update from the tracker's ?edit page (Can't part ship list) or edit this file directly.",
+    source:NPS.source||"Sage 200 report 'Customer No Part Despatches List' (NoPartDespatches = True)",updated:new Date().toISOString().slice(0,10),customers:list};
+  lsSet(LS_NPS,j);npsApply(j,true);build();render();
+  const json=JSON.stringify(j,null,1),tok=pubToken();
+  const download=why=>{const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([json],{type:'application/json'}));a.download='no-part-ship.json';document.body.appendChild(a);a.click();setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove()},500);
+    m.className='msg bad';m.textContent=(why?why+' ':'')+'no-part-ship.json downloaded – upload it to the SOPtracker repo. The list is in use on this PC meanwhile.'};
+  if(!tok){download('No publishing token on this PC.');return}
+  m.className='msg';m.textContent='Writing to GitHub…';
+  const headers={'Authorization':'Bearer '+tok,'Accept':'application/vnd.github+json'};
+  const attempt=n=>fetch(NPS_API+'?t='+Date.now(),{headers,cache:'no-store'})
+    .then(r=>{if(r.status===404)return {sha:null};if(!r.ok)throw new Error('GitHub said '+r.status);return r.json()})
+    .then(f=>{const body={message:"Can't part ship list updated from the order tracker ("+list.length+' customers)',content:pubB64(json)};if(f.sha)body.sha=f.sha;
+      return fetch(NPS_API,{method:'PUT',headers:Object.assign({'Content-Type':'application/json'},headers),body:JSON.stringify(body)})})
+    .then(r=>{if((r.status===409||r.status===422)&&n<3)return attempt(n+1);if(!r.ok)throw new Error('GitHub refused the save ('+r.status+')');
+      try{localStorage.removeItem(LS_NPS)}catch(e){}NPS.local=false;m.className='msg ok';m.textContent='Saved – '+list.length+' customers. The team sees it within a minute.';setTimeout(()=>closeOv('npsOv'),1200)})
+    .catch(e=>download(String(e.message||e)+'.'));
+  attempt(1);
+}
 function fetchPP(){
   fetch(PP_URL+'?t='+Date.now()).then(r=>{if(!r.ok)throw new Error('HTTP '+r.status);return r.json()}).then(s=>{
     const codes=new Set(),rows=new Map();
@@ -620,7 +694,8 @@ function build(){
     else if(live.some(l=>l.status==='short'||l.status==='risk'))o.status='risk';
     else if(!waiting.length)o.status='stock';
     else o.status='covered';
-    o.hay=(o.doc+' '+o.acctName+' '+o.acct+' '+o.ref+' '+o.user+' '+o.lines.map(l=>l.code+' '+l.desc).join(' ')).toLowerCase();
+    o.noPart=noPartShip(o);   // v2.9: customer cannot take part despatches
+    o.hay=(o.doc+' '+o.acctName+' '+o.acct+' '+o.ref+' '+o.user+' '+o.lines.map(l=>l.code+' '+l.desc).join(' ')+(o.noPart?" can't part ship":'')).toLowerCase();
   });
   pruneEmbX();
   computeJumps();
@@ -678,6 +753,8 @@ const emb10=()=>liveOrders().filter(o=>o.emb&&o.in10&&o.status!=='hold');       
 /* ── labels ────────────────────────────────────────────────────────────── */
 const STATUS_PILL={late:['p-red','Late'],risk:['p-amber','At risk'],short:['p-red','Not on order'],covered:['p-blue','Covered'],stock:['p-green','In stock'],done:['p-grey','Despatched'],hold:['p-grey','On hold'],na:['p-grey','n/a']};
 const pill=st=>{const p=STATUS_PILL[st]||['p-grey',st];return `<span class="pill ${p[0]}">${p[1]}</span>`};
+const npsPill=o=>o.noPart?' <span class="pill p-nps" title="This customer cannot take part despatches (Sage flag) – the order goes out complete or not at all">&#9940; No part ship</span>':'';
+const rowCls=o=>o.noPart?'row nps':'row';
 const GROUP_LABEL={bought:'Bought in',made:'Made in house',both:'Waiting on both',"":'–'};
 const WAIT_LABEL={bought:'a supplier purchase order',made:'production (a works order or container)',both:'production and a supplier',"":'nothing'};
 const groupPill=g=>g==='bought'?'<span class="pill p-gold">Bought in</span>':g==='made'?'<span class="pill p-blue">Made in house</span>':g==='both'?'<span class="pill p-grey">Both</span>':'';
@@ -811,9 +888,10 @@ function orderCard(o){
       +(o.expected?`Expected complete <b>${fdl(o.expected)}</b>${o.promD&&o.expected>o.promD?` (promised ${fdl(o.promD)})`:''}.`:o.unknown?'Completion date unknown until the missing items are ordered or dated.':'');
     if(o.contested)why+=' <b>Stock contested</b> on at least one line – see the ⚠ below.';
   }
+  if(o.noPart&&o.status!=='done')why=`<b>&#9940; Can't part ship</b> – ${esc(o.acctName||o.acct)} takes complete orders only, so nothing goes out until every line is in. `+why;
   const prog=o.ordQty?Math.round(o.despQty/o.ordQty*100):0;
   let h=`<div class="card">
-    <h2>${coTag(o.co)} <span style="font-size:18px">SO ${esc(o.doc)}</span> ${pill(o.status)}${o.hold?' <span class="pill p-grey">On hold</span>':''}${o.group?' '+groupPill(o.group):''}${o.special?' <span class="pill p-gold">Special make</span>':''}${o.notes&&o.notes.length?' <span class="pill p-grey" title="Comment lines on the Sage order – see below the lines">&#128172; '+o.notes.length+'</span>':''}<span class="r">${o.user?'raised by '+esc(o.user)+' · ':''}${prog}% despatched</span></h2>
+    <h2>${coTag(o.co)} <span style="font-size:18px">SO ${esc(o.doc)}</span> ${pill(o.status)}${npsPill(o)}${o.hold?' <span class="pill p-grey">On hold</span>':''}${o.group?' '+groupPill(o.group):''}${o.special?' <span class="pill p-gold">Special make</span>':''}${o.notes&&o.notes.length?' <span class="pill p-grey" title="Comment lines on the Sage order – see below the lines">&#128172; '+o.notes.length+'</span>':''}<span class="r">${o.user?'raised by '+esc(o.user)+' · ':''}${prog}% despatched</span></h2>
     <div class="ord-head">
       <div><div class="lab">Customer</div><div class="val">${esc(custName(o))}<span class="sm">${esc(o.acct)}${custName(o)!==o.acctName?' · '+esc(o.acctName):''}</span></div></div>
       <div><div class="lab">Their order ref</div><div class="val">${esc(o.ref)||'–'}</div></div>
@@ -826,7 +904,7 @@ function orderCard(o){
     <div class="tw"><table><thead><tr><th>#</th><th>Code</th><th class="num">Ordered</th><th class="num">Sent</th><th class="num">To go</th><th>Where it is</th><th>Expected</th><th>Status</th></tr></thead><tbody>`;
   o.lines.forEach(ln=>{
     const open=UI.openLine[ln.key];
-    h+=`<tr class="row" onclick="toggleLine('${esc(ln.key)}')"><td class="num">${ln.seq||''}</td><td><span class="code">${esc(ln.code)}</span>${ln.special?' <span class="pill p-gold" title="Made in house, not a stock-held code">SM</span>':''}<div class="desc">${esc(ln.desc)}</div></td><td class="num">${fmt(ln.q1)}</td><td class="num">${fmt(ln.q2)}</td><td class="num"><b>${fmt(ln.out)}</b></td><td>${lineWhere(ln)}</td><td>${expCell(ln)}</td><td>${pill(ln.status)}</td></tr>`;
+    h+=`<tr class="${rowCls(o)}" onclick="toggleLine('${esc(ln.key)}')"><td class="num">${ln.seq||''}</td><td><span class="code">${esc(ln.code)}</span>${ln.special?' <span class="pill p-gold" title="Made in house, not a stock-held code">SM</span>':''}<div class="desc">${esc(ln.desc)}</div></td><td class="num">${fmt(ln.q1)}</td><td class="num">${fmt(ln.q2)}</td><td class="num"><b>${fmt(ln.out)}</b></td><td>${lineWhere(ln)}</td><td>${expCell(ln)}</td><td>${pill(ln.status)}</td></tr>`;
     if(open)h+=`<tr class="det"><td colspan="8">${lineDetail(ln)}</td></tr>`;
   });
   h+=`</tbody></table></div>`;
@@ -847,7 +925,7 @@ function lineDetail(ln){
   h+=`</h4><table><thead><tr><th>Order</th><th>Customer</th><th>Promised</th><th>Ordered</th><th class="num">Qty</th><th>Covered by</th></tr></thead><tbody>`;
   p.lines.forEach(l=>{
     const me=l.key===ln.key;
-    h+=`<tr${me?' style="background:#fdf9ef;font-weight:600"':''}><td>${coTag(l.co)} ${l.ic?'<span class="sm">intercompany</span> ':''}<a href="javascript:void(0)" onclick="openOrder('${esc(l.order.key)}')">SO ${esc(l.doc)}</a>${me?' (this one)':''}</td><td>${esc(custName(l.order))}</td><td>${fd(l.promD)}</td><td>${fd(pd(l.order.added))}</td><td class="num">${fmt(l.out)}</td><td>${l.sources.map(s=>srcChip(s,l)).join('')||'–'}</td></tr>`;
+    h+=`<tr${me?' style="background:#fdf9ef;font-weight:600"':''}><td>${coTag(l.co)} ${l.ic?'<span class="sm">intercompany</span> ':''}<a href="javascript:void(0)" onclick="openOrder('${esc(l.order.key)}')">SO ${esc(l.doc)}</a>${me?' (this one)':''}</td><td>${esc(custName(l.order))}${npsPill(l.order)}</td><td>${fd(l.promD)}</td><td>${fd(pd(l.order.added))}</td><td class="num">${fmt(l.out)}</td><td>${l.sources.map(s=>srcChip(s,l)).join('')||'–'}</td></tr>`;
   });
   h+='</tbody></table></div>';
   return h;
@@ -866,7 +944,7 @@ function orderTable(list,tab){
   if(!list.length)return '<div class="empty">Nothing here.</div>';
   let h=`<div class="tw"><table><thead><tr>${th(tab,'status','Status')}${th(tab,'so','Order')}${th(tab,'cust','Customer')}${th(tab,'added','Ordered')}${th(tab,'prom','Promised')}${th(tab,'days','Days')}${th(tab,'out','To go','num')}<th>Waiting on</th>${th(tab,'exp','Expected')}${th(tab,'group','Type')}</tr></thead><tbody>`;
   list.forEach(o=>{
-    h+=`<tr class="row" onclick="openOrder('${esc(o.key)}')"><td>${pill(o.status)}${o.contested?' <span class="pill p-amber" title="Stock contested on at least one line">&#9888;</span>':''}${o.hold?' <span class="pill p-grey">Hold</span>':''}${o.special?' <span class="pill p-gold" title="Special make: '+o.special+' non-stock line'+(o.special>1?'s':'')+'">SM</span>':''}</td><td>${coTag(o.co)} <span class="code">${esc(o.doc)}</span></td><td>${esc(custName(o))}<div class="desc">${custName(o)===o.ref.trim().replace(/^(EMB|DTF):\s*/i,'')?esc(o.acctName):esc(o.ref)}</div></td><td>${fd(pd(o.added))}</td><td>${fd(o.promD)}</td><td>${daysCell(o)}</td><td class="num">${fmt(o.outQty)}<div class="sm">${o.outLines} line${o.outLines===1?'':'s'}</div></td><td class="sm" style="color:var(--txt)">${o.waiting.length?waitSummary(o):'<span class="sm">in stock</span>'}</td><td>${orderExp(o)}</td><td>${groupPill(o.group)}</td></tr>`;
+    h+=`<tr class="${rowCls(o)}" onclick="openOrder('${esc(o.key)}')"><td>${pill(o.status)}${npsPill(o)}${o.contested?' <span class="pill p-amber" title="Stock contested on at least one line">&#9888;</span>':''}${o.hold?' <span class="pill p-grey">Hold</span>':''}${o.special?' <span class="pill p-gold" title="Special make: '+o.special+' non-stock line'+(o.special>1?'s':'')+'">SM</span>':''}</td><td>${coTag(o.co)} <span class="code">${esc(o.doc)}</span></td><td>${esc(custName(o))}<div class="desc">${custName(o)===o.ref.trim().replace(/^(EMB|DTF):\s*/i,'')?esc(o.acctName):esc(o.ref)}</div></td><td>${fd(pd(o.added))}</td><td>${fd(o.promD)}</td><td>${daysCell(o)}</td><td class="num">${fmt(o.outQty)}<div class="sm">${o.outLines} line${o.outLines===1?'':'s'}</div></td><td class="sm" style="color:var(--txt)">${o.waiting.length?waitSummary(o):'<span class="sm">in stock</span>'}</td><td>${orderExp(o)}</td><td>${groupPill(o.group)}</td></tr>`;
   });
   return h+'</tbody></table></div>';
 }
@@ -901,7 +979,7 @@ function meetTable(list,tab){
   const isP=tab==='prod10';
   let h=`<div class="tw"><table><thead><tr>${th(tab,'status','Status')}${th(tab,'so','Order')}${th(tab,'cust','Customer')}${th(tab,'prom','Promised')}${th(tab,'days','Days')}${th(tab,'out','To go','num')}${isP?'<th>In production</th>':'<th>Embroidery / transfer</th><th>Garments</th>'}${th(tab,'exp','Expected')}</tr></thead><tbody>`;
   list.forEach(o=>{
-    h+=`<tr class="row" onclick="openOrder('${esc(o.key)}')"><td>${pill(o.status)}${o.special?' <span class="pill p-gold" title="Special make">SM</span>':''}</td><td>${coTag(o.co)} <span class="code">${esc(o.doc)}</span></td><td>${esc(custName(o))}<div class="desc">${custName(o)===o.ref.trim().replace(/^(EMB|DTF):\s*/i,'')?esc(o.acctName):esc(o.ref)}</div></td><td>${fd(o.promD)}</td><td>${daysCell(o)}</td><td class="num">${fmt(o.outQty)}<div class="sm">${o.outLines} line${o.outLines===1?'':'s'}</div></td>${isP?`<td class="sm summary-list" style="color:var(--txt)">${prodSummary(o)}</td>`:`<td class="sm summary-list" style="color:var(--txt)">${embSummary(o)}</td><td class="sm" style="color:var(--txt)">${o.waiting.length?waitSummary(o):'<span class="pill p-green">In stock</span>'}</td>`}<td>${isP?orderExp(o):embExpCell(o)}</td></tr>`;
+    h+=`<tr class="${rowCls(o)}" onclick="openOrder('${esc(o.key)}')"><td>${pill(o.status)}${npsPill(o)}${o.special?' <span class="pill p-gold" title="Special make">SM</span>':''}</td><td>${coTag(o.co)} <span class="code">${esc(o.doc)}</span></td><td>${esc(custName(o))}<div class="desc">${custName(o)===o.ref.trim().replace(/^(EMB|DTF):\s*/i,'')?esc(o.acctName):esc(o.ref)}</div></td><td>${fd(o.promD)}</td><td>${daysCell(o)}</td><td class="num">${fmt(o.outQty)}<div class="sm">${o.outLines} line${o.outLines===1?'':'s'}</div></td>${isP?`<td class="sm summary-list" style="color:var(--txt)">${prodSummary(o)}</td>`:`<td class="sm summary-list" style="color:var(--txt)">${embSummary(o)}</td><td class="sm" style="color:var(--txt)">${o.waiting.length?waitSummary(o):'<span class="pill p-green">In stock</span>'}</td>`}<td>${isP?orderExp(o):embExpCell(o)}</td></tr>`;
   });
   return h+'</tbody></table></div>';
 }
@@ -923,8 +1001,9 @@ function renderRisk(v){
   const contested=liveOrders().filter(o=>o.contested);
   const special=liveOrders().filter(o=>o.special>0);
   const lateProd=late.filter(o=>o.waitProd),lateSupp=late.filter(o=>o.waitSupp),noPO=all.filter(o=>o.noPO);
+  const nps=liveOrders().filter(o=>o.noPart);   // v2.9: every live order for a customer that cannot take part despatches
   const p10=prod10(),e10=emb10(),AH=SET.ahead||10;
-  const tiles=[['late','red',late.length,'late (promised date passed)'],['lateProd','red',lateProd.length,'late – waiting on production'],['lateSupp','red',lateSupp.length,'late – waiting on suppliers (incl. Clockwork)'],['noPO','amber',noPO.length,'bought in – no PO raised (late or at risk)'],['risk','amber',risk.length,'at risk'],['contested','amber',contested.length,'stock contested'],['soon','steel',liveOrders().filter(o=>o.days!=null&&o.days>=0&&o.days<=SET.soon).length,`due within ${SET.soon} days`],['special','gold',special.length,`special makes (${special.filter(o=>o.specialWait>0).length} still in production)`],
+  const tiles=[['late','red',late.length,'late (promised date passed)'],['lateProd','red',lateProd.length,'late – waiting on production'],['lateSupp','red',lateSupp.length,'late – waiting on suppliers (incl. Clockwork)'],['noPO','amber',noPO.length,'bought in – no PO raised (late or at risk)'],['risk','amber',risk.length,'at risk'],['contested','amber',contested.length,'stock contested'],['soon','steel',liveOrders().filter(o=>o.days!=null&&o.days>=0&&o.days<=SET.soon).length,`due within ${SET.soon} days`],['special','gold',special.length,`special makes (${special.filter(o=>o.specialWait>0).length} still in production)`],['nps','red',nps.length,`can't part ship – complete orders only (${nps.filter(o=>o.status==='late').length} late, ${nps.filter(o=>o.waiting.length).length} waiting)`],
     ['prod10','navy',p10.length,`production list – next ${AH} working days + late (${p10.filter(o=>o.status==='late').length})`],['emb10','navy',e10.length,`embroidery &amp; transfer list – next ${AH} working days + late (${e10.filter(o=>o.status==='late').length})`]];
   let h=`<div class="tiles">${tiles.map(t=>`<div class="tile ${t[1]} ${UI.tile===t[0]?'on':''}" onclick="setTile('${t[0]}')"><b>${t[2]}</b><span>${t[3]}</span></div>`).join('')}</div>`;
   if(UI.tile==='prod10'||UI.tile==='emb10'){   // v2.2: one list in date order for the morning meeting
@@ -934,28 +1013,28 @@ function renderRisk(v){
     v.innerHTML=h;return;
   }
   let list=all;
-  if(UI.tile==='late')list=late;else if(UI.tile==='lateProd')list=lateProd;else if(UI.tile==='lateSupp')list=lateSupp;else if(UI.tile==='noPO')list=noPO;else if(UI.tile==='risk')list=risk;else if(UI.tile==='contested')list=contested;else if(UI.tile==='soon')list=liveOrders().filter(o=>o.days!=null&&o.days>=0&&o.days<=SET.soon);else if(UI.tile==='special')list=special;
+  if(UI.tile==='late')list=late;else if(UI.tile==='lateProd')list=lateProd;else if(UI.tile==='lateSupp')list=lateSupp;else if(UI.tile==='noPO')list=noPO;else if(UI.tile==='risk')list=risk;else if(UI.tile==='contested')list=contested;else if(UI.tile==='soon')list=liveOrders().filter(o=>o.days!=null&&o.days>=0&&o.days<=SET.soon);else if(UI.tile==='special')list=special;else if(UI.tile==='nps')list=nps;
   const groups=[['bought','Bought in','Waiting on a supplier PO'],['made','Made in house','Waiting on a works order or a Clockwork container – including codes usually bought from Clockwork that have a works order on'],['both','Waiting on both','Some lines on production, some on a supplier']];
   const none=list.filter(o=>!o.group);
   groups.forEach(g=>{
     const rows=sortBy(list.filter(o=>o.group===g[0]),'risk-'+g[0],{k:'days',d:'a'});
     h+=`<div class="sec"><h3>${g[1]} <span class="n">${rows.length}</span><span class="r">${g[2]} · <a href="javascript:void(0)" onclick="exportCsv('${g[0]}')">Export CSV</a></span></h3><div class="card" style="margin-top:8px">${orderTable(rows,'risk-'+g[0])}</div></div>`;
   });
-  if(none.length)h+=`<div class="sec"><h3>${UI.tile==='special'?'Made and booked in':'Nothing waiting – date only'} <span class="n">${none.length}</span><span class="r">${UI.tile==='special'?'the special make is in stock; the order can be picked':'everything outstanding is in stock; the promised date has passed or is contested'}</span></h3><div class="card" style="margin-top:8px">${orderTable(sortBy(none,'risk-none',{k:'days',d:'a'}),'risk-none')}</div></div>`;
-  h+=`<div class="legend"><span><b>Late</b> = promised date (Sage order header) has passed with quantity still to go, or the order is due today and its goods are still in production.</span><span><b>At risk</b> = a line's cover arrives after the promised date, or on an unknown date, or nothing is on order for it.</span><span><b>Contested</b> = the line has stock only because it is older than another live order that will go short.</span><span><b>Overdue</b> = a works order or PO date has passed and it is still not in.</span><span><b>Waiting on production</b> = a late order with a line on a works order (or a special make with no WO yet). <b>Waiting on suppliers</b> = a late order with a line on a container or a supplier PO, Clockwork included. An order can be in both.</span><span><b>Special make</b> = a made-in-house line whose code is not stock held in Sage (or one the planner lists as a special make).</span><span>Intercompany orders (OLIVER / TIB003) are not listed.</span></div>`;
+  if(none.length)h+=`<div class="sec"><h3>${UI.tile==='special'?'Made and booked in':UI.tile==='nps'?'Complete and in stock':'Nothing waiting – date only'} <span class="n">${none.length}</span><span class="r">${UI.tile==='special'?'the special make is in stock; the order can be picked':UI.tile==='nps'?'every line is in stock, so the whole order can go':'everything outstanding is in stock; the promised date has passed or is contested'}</span></h3><div class="card" style="margin-top:8px">${orderTable(sortBy(none,'risk-none',{k:'days',d:'a'}),'risk-none')}</div></div>`;
+  h+=`<div class="legend"><span><b>Late</b> = promised date (Sage order header) has passed with quantity still to go, or the order is due today and its goods are still in production.</span><span><b>At risk</b> = a line's cover arrives after the promised date, or on an unknown date, or nothing is on order for it.</span><span><b>Contested</b> = the line has stock only because it is older than another live order that will go short.</span><span><b>Overdue</b> = a works order or PO date has passed and it is still not in.</span><span><b>Waiting on production</b> = a late order with a line on a works order (or a special make with no WO yet). <b>Waiting on suppliers</b> = a late order with a line on a container or a supplier PO, Clockwork included. An order can be in both.</span><span><b>Special make</b> = a made-in-house line whose code is not stock held in Sage (or one the planner lists as a special make).</span><span><b>&#9940; No part ship</b> (light red rows) = the customer cannot take part despatches in Sage, so the order goes out complete or not at all.</span><span>Intercompany orders (OLIVER / TIB003) are not listed.</span></div>`;
   v.innerHTML=h;
 }
 function setTile(t){UI.tile=UI.tile===t?'':t;render()}
 function exportCsv(g){
   if(g==='prod10'||g==='emb10')return exportMeetCsv(g);
   const all=riskOrders();
-  let list=all;if(UI.tile==='late')list=all.filter(o=>o.status==='late');else if(UI.tile==='lateProd')list=all.filter(o=>o.status==='late'&&o.waitProd);else if(UI.tile==='lateSupp')list=all.filter(o=>o.status==='late'&&o.waitSupp);else if(UI.tile==='noPO')list=all.filter(o=>o.noPO);else if(UI.tile==='risk')list=all.filter(o=>o.status==='risk');else if(UI.tile==='contested')list=liveOrders().filter(o=>o.contested);else if(UI.tile==='soon')list=liveOrders().filter(o=>o.days!=null&&o.days>=0&&o.days<=SET.soon);else if(UI.tile==='special')list=liveOrders().filter(o=>o.special>0);
+  let list=all;if(UI.tile==='late')list=all.filter(o=>o.status==='late');else if(UI.tile==='lateProd')list=all.filter(o=>o.status==='late'&&o.waitProd);else if(UI.tile==='lateSupp')list=all.filter(o=>o.status==='late'&&o.waitSupp);else if(UI.tile==='noPO')list=all.filter(o=>o.noPO);else if(UI.tile==='risk')list=all.filter(o=>o.status==='risk');else if(UI.tile==='contested')list=liveOrders().filter(o=>o.contested);else if(UI.tile==='soon')list=liveOrders().filter(o=>o.days!=null&&o.days>=0&&o.days<=SET.soon);else if(UI.tile==='special')list=liveOrders().filter(o=>o.special>0);else if(UI.tile==='nps')list=liveOrders().filter(o=>o.noPart);
   const rows=sortBy(list.filter(o=>o.group===g),'risk-'+g,{k:'days',d:'a'});
   const cell=s=>'"'+String(s==null?'':s).replace(/"/g,'""')+'"';
-  const lines=[['Status','Company','SO','Customer','Account','Their ref','Ordered','Promised','Days','Lines to go','Qty to go','Waiting on','Expected','Type'].map(cell).join(',')];
+  const lines=[['Status','Company','SO','Customer','Account','Their ref','Ordered','Promised','Days','Lines to go','Qty to go','Waiting on','Expected','Type','Part ship'].map(cell).join(',')];
   rows.forEach(o=>{
     const w=[];const seen=new Set();o.waiting.forEach(l=>l.sources.forEach(s=>{let k='';if(s.t==='wo')k=l.base+': '+s.ref+' due '+(s.due||'?');else if(s.t==='cont')k=l.base+': '+s.ref+' lands '+s.date;else if(s.t==='po')k=l.base+': PO '+soNo(s.po.src.doc)+' '+(s.po.src.acctName||'')+' '+(s.po.src.date||'no date');else if(s.t==='short')k=l.base+': not on order';else if(s.t==='smpend')k=l.base+': special make, no WO';if(k&&!seen.has(k)){seen.add(k);w.push(k)}}));
-    lines.push([STATUS_PILL[o.status][1],o.co,o.doc,custName(o),o.acct,o.ref,o.added,o.promised,o.days,o.outLines,o.outQty,w.join(' | '),o.unknown?'unknown':iso(o.expected),GROUP_LABEL[o.group]].map(cell).join(','));
+    lines.push([STATUS_PILL[o.status][1],o.co,o.doc,custName(o),o.acct,o.ref,o.added,o.promised,o.days,o.outLines,o.outQty,w.join(' | '),o.unknown?'unknown':iso(o.expected),GROUP_LABEL[o.group],o.noPart?'No':'Yes'].map(cell).join(','));
   });
   const a=document.createElement('a');a.href=URL.createObjectURL(new Blob(['﻿'+lines.join('\r\n')],{type:'text/csv'}));a.download='late-at-risk-'+g+'-'+iso(today())+'.csv';document.body.appendChild(a);a.click();setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove()},500);
 }
@@ -978,7 +1057,7 @@ function renderJump(v){
       else if(!lo.unknown&&bf.when<=lo.expected)impact=`backfill ${esc(bf.label)} ${fd(bf.when)} – lender unaffected`;
       else impact=`backfill ${esc(bf.label)} ${fd(bf.when)}${lo.unknown?'':' – <span style="color:var(--amber)">lender slips to then</span>'}`;
       lend.push(`<div><b>SO ${esc(lo.doc)}</b> ${esc(custName(lo))} · promised ${fd(lo.promD)} · waiting until <b>${until}</b> on ${waitSummary(lo).split('<br>')[0]}<div class="sm">${impact}</div></div>`)}));
-    h+=`<tr class="row" onclick="openOrder('${esc(o.key)}')"><td>${pill(o.status)}</td><td>${coTag(o.co)} <span class="code">${esc(o.doc)}</span></td><td>${esc(custName(o))}<div class="desc">${esc(o.ref)}</div></td><td>${fd(o.promD)}</td><td>${daysCell(o)}</td><td class="num">${fmt(o.outQty)}<div class="sm">${o.outLines} line${o.outLines===1?'':'s'}</div></td><td class="summary-list">${borrow}</td><td class="summary-list">${lend.join('')}</td></tr>`;
+    h+=`<tr class="${rowCls(o)}" onclick="openOrder('${esc(o.key)}')"><td>${pill(o.status)}${npsPill(o)}</td><td>${coTag(o.co)} <span class="code">${esc(o.doc)}</span></td><td>${esc(custName(o))}<div class="desc">${esc(o.ref)}</div></td><td>${fd(o.promD)}</td><td>${daysCell(o)}</td><td class="num">${fmt(o.outQty)}<div class="sm">${o.outLines} line${o.outLines===1?'':'s'}</div></td><td class="summary-list">${borrow}</td><td class="summary-list">${lend.join('')}</td></tr>`;
   });
   h+='</tbody></table></div></div>';
   v.innerHTML=h;
@@ -997,6 +1076,7 @@ function renderData(v){
   v.innerHTML=`<div class="card"><h2>Where the data comes from</h2><div class="note">
   <b>Sage</b> (sales orders, purchase orders, stock): pasted ${t}${DATA.pubAt?' · published '+fdt(DATA.pubAt):''} · ${DATA.so.length} SO lines, ${(DATA.cmt||[]).length} comment lines, ${DATA.po.length} PO lines, ${DATA.stk.length} stock rows.<br>
   <b>Works orders</b>: production planner, ${PP.ok?'published '+fdt(PP.savedAt)+' · '+PP.wos.length+' live works orders · '+(PP.pipe.reduce((x,c)=>x+c.qty,0)+[...PP.smPipe.values()].reduce((x,a)=>x+a.reduce((y,c)=>y+c.qty,0),0))+' units completed, awaiting Sage book-in (pipeline until 7am next day) · SOP demand pasted '+fdt(PP.sopAt):'<span style="color:var(--red)">not read ('+esc(PP.err)+')</span>'}.<br>
+  <b>Can't part ship</b>: ${NPS.ok?NPS.customers.length+' customers from no-part-ship.json'+(NPS.updated?' (updated '+NPS.updated+')':'')+(NPS.local?' – <span style="color:var(--amber)">list saved on this PC, not yet written to GitHub</span>':''):'<span style="color:var(--red)">not read ('+esc(NPS.err)+')</span>'} · ${liveOrders().filter(o=>o.noPart).length} live orders flagged.<br>
   <b>Containers</b>: stock planner, ${SP.ok?'published '+fdt(SP.savedAt)+' · '+SP.cPOs.map(c=>esc(c.ref)+' lands '+fd(pd(c.date))).join(', ')+(SP.nextContDate?' · next order date '+fd(pd(SP.nextContDate)):''):'<span style="color:var(--red)">not read ('+esc(SP.err)+')</span>'}.<br><br>
   <b>Who gets the stock</b>: Sage allocation first, then free stock to the oldest promised date, then units already made on a completed works order but not yet booked into Sage (the planner's pipeline, until 7am the next day), then a special-make works order raised for the line, the back-to-back PO Sage generated from the order, live works orders (oldest raised first), containers in landing order, and purchase orders by date. Made-in-house codes${SET.share?' share Tibard, BULK and OH stock as one pool':' are per company'}; bought-in codes are per company. Held orders ${SET.holdSO?'count as':'do not take'} demand.<br><br>
   <b>Version</b> ${APP_VER}. Order tracker, Tibard Apps. Tomorrow: this paste is replaced by the live Sage link when the apps move on-prem.
@@ -1234,7 +1314,7 @@ function readHash(){const m=/[#&]so=([^&]+)/.exec(location.hash);if(m){UI.find=d
 window.addEventListener('hashchange',()=>{readHash();render()});
 (function init(){
   applyMode();pubRefreshBtn();readHash();
-  fetchPP();fetchSP();
+  fetchPP();fetchSP();fetchNPS();
   if(IS_EDITOR){
     const raw=localStorage.getItem(LS_RAW);
     if(raw)applyRaw(raw,localStorage.getItem(LS_TS));else render();
