@@ -328,7 +328,7 @@ textarea{width:100%;min-height:150px;font-size:11px;font-family:Consolas,monospa
    "Contested": a line only has stock because it is older than another order
    that will go short on the same code.
    ═══════════════════════════════════════════════════════════════════════ */
-const APP_VER='2.9';
+const APP_VER='2.10';
 const LS_RAW='ordertracker_raw', LS_TS='ordertracker_ts', LS_SET='ordertracker_settings', LS_DUE='ordertracker_wodue', LS_EMBX='ordertracker_embexp';
 const DEF_SET={
   made:['Tibard','Oliver Harvey','Clockwork','Clockwork Clothing','Clockwork Giant Clothing'],
@@ -557,7 +557,13 @@ function build(){
   // special-make works orders keyed by the line they were raised for
   const smWO=new Map();PP.wos.forEach(w=>{if(w.sm&&w.sm.lineKey)smWO.set(w.sm.lineKey,w)});
 
-  byPool.forEach((lines,key)=>{
+  // v2.10: OH stock that Tibard sells. For a Tibard bought-in code whose preferred supplier is OLIVER (clogs etc.), the
+  // warehouse picks OH's physical stock and despatches it in Tibard; Tibard goes negative and Sage's overnight routine
+  // raises the Tibard->OH back-to-back PO afterwards. So a Tibard line with no PO is covered when OH has the stock on the
+  // shelf. OH pools run first so OH's own orders take OH stock before Tibard lines do; what is left is in ohLeft.
+  const ohLeft=new Map();
+  const poolKeys=[...byPool.keys()].sort((a,b)=>(a.startsWith('OLIVER HARVEY|')?0:1)-(b.startsWith('OLIVER HARVEY|')?0:1));
+  poolKeys.forEach(key=>{const lines=byPool.get(key);
     lines.sort(fifo);
     const [scope,base]=key.split('|');
     const cos=scope==='ALL'?['TIBARD','OLIVER HARVEY']:[scope];
@@ -580,6 +586,11 @@ function build(){
     pos.sort((a,b)=>(a.date?iso(a.date):'9999').localeCompare(b.date?iso(b.date):'9999')||a.src.doc.localeCompare(b.src.doc));
     let wi=0,ci=0;
     const stockTakers=[];let shortAfterStock=0;
+    // v2.10: OH shelf stock available to Tibard lines of a code Tibard buys from OH (preferred supplier OLIVER)
+    const tibStk=scope==='TIBARD'?stkFor('TIBARD',base):null;
+    const fromOH=!!tibStk&&String(tibStk.supNo||'').trim().toUpperCase()==='OLIVER';
+    let ohStock=0;if(fromOH){const r=stkFor('OLIVER HARVEY',base);ohStock=ohLeft.has(base)?ohLeft.get(base):(r&&r.free>0?r.free:0)}
+    const ohStockTotal=ohStock;
     lines.forEach(ln=>{
       if(shared&&ln.ic){ln.sources.push({t:'mirror',qty:ln.out});return}   // the OH customer line carries this demand
       let need=ln.out;const src=ln.sources;
@@ -595,6 +606,8 @@ function build(){
       if(need>0&&stock>0){const q=Math.min(stock,need);stock-=q;need-=q;src.push({t:'stock',qty:q});stockTakers.push(ln)}
       // v2.5: then the pipeline – made, awaiting the warehouse book-in
       while(need>0&&pi<pipes.length){const c=pipes[pi];const q=Math.min(c.left,need);if(q>0){c.left-=q;need-=q;src.push({t:'pipe',qty:q,ref:c.c.ref,completed:c.c.completed})}if(c.left<=0)pi++}
+      // v2.10: OH shelf stock for a code Tibard buys from OH - picked from OH now, Tibard's PO on OLIVER follows the despatch
+      if(need>0&&ohStock>0){const q=Math.min(ohStock,need);ohStock-=q;need-=q;src.push({t:'ohstock',qty:q})}
       // the back-to-back PO Sage generated from this order
       if(need>0&&ln.link){pos.filter(p=>soNo(p.src.doc)===ln.link&&p.left>0).forEach(p=>{if(need<=0)return;const q=Math.min(p.left,need);p.left-=q;need-=q;src.push({t:'po',qty:q,po:p,b2b:true})})}
       // works orders, oldest raised first
@@ -606,14 +619,15 @@ function build(){
       if(need>0){src.push({t:'short',qty:need});if(stockTotal>0)shortAfterStock+=need}
       ln.stockLeft=stock;
     });
+    if(scope==='OLIVER HARVEY')ohLeft.set(base,stock);   // v2.10: what OH has left after its own orders, for Tibard lines of the same code
     // contested: stock ran out before every order was served
-    const unserved=lines.filter(ln=>ln.sources.some(s=>s.t!=='stock'&&s.t!=='alloc'&&s.t!=='mirror'&&s.t!=='pipe'));
+    const unserved=lines.filter(ln=>ln.sources.some(s=>s.t!=='stock'&&s.t!=='alloc'&&s.t!=='mirror'&&s.t!=='pipe'&&s.t!=='ohstock'));
     if(stockTakers.length&&unserved.length){
       const others=unserved.filter(u=>!stockTakers.includes(u));
       const wanted=lines.filter(ln=>!ln.ic||!shared).reduce((x,l)=>x+l.out,0);
       stockTakers.forEach(ln=>{ln.contested=true;ln.contestNote=`Stock ${fmt(stockTotal)} but ${fmt(wanted)} wanted across ${lines.length} live lines; ${others.length?others.length+' other order'+(others.length>1?'s':'')+' go'+(others.length>1?'':'es')+' short':'this code runs out'}. Stock covers the oldest promised date first.`});
     }
-    POOLS.set(key,{key,base,scope,lines,stock:stockTotal,stockBits,wos,conts,pos});
+    POOLS.set(key,{key,base,scope,lines,stock:stockTotal,stockBits,wos,conts,pos,fromOH,ohStock:ohStockTotal});
   });
 
   // ── dates and status per line ──
@@ -623,7 +637,7 @@ function build(){
     let exp=t,unknown=false,anyWait=false,overdue=false;
     ln.sources.forEach(s=>{
       let d=null;
-      if(s.t==='alloc'||s.t==='stock'||s.t==='mirror'||s.t==='pipe')d=t;   // v2.5: pipeline = made, counts as stock
+      if(s.t==='alloc'||s.t==='stock'||s.t==='mirror'||s.t==='pipe'||s.t==='ohstock')d=t;   // v2.5: pipeline = made, counts as stock; v2.10: OH shelf stock too
       else if(s.t==='wo'){d=pd(s.due);if(!d)unknown=true;else if(d<t){d=t;overdue=true;s.overdue=true}anyWait=true;s.when=d}
       else if(s.t==='cont'){d=nextWorkDay(pd(s.date),1);anyWait=true;s.when=d}
       else if(s.t==='po'){anyWait=true;const p=s.po.src;
@@ -668,6 +682,7 @@ function build(){
     o.expected=unk?null:exp;o.unknown=unk;
     o.expSet=EMBX[o.key]?pd(EMBX[o.key].date):null;   // v2.4: expected date set at the production meeting (embroidery list)
     o.contested=live.some(l=>l.contested);
+    o.ohStock=live.reduce((x,l)=>x+l.sources.filter(s=>s.t==='ohstock').reduce((y,s)=>y+s.qty,0),0);   // v2.10: units covered by OH shelf stock
     const kinds=new Set();waiting.forEach(l=>l.sources.forEach(s=>{
       if(s.t==='wo'||s.t==='cont'||s.t==='smpend')kinds.add('made');
       else if(s.t==='po')kinds.add(s.via?(s.via.made?'made':'bought'):'bought');
@@ -709,7 +724,7 @@ function build(){
 function computeJumps(){
   JUMPS=[];
   const stockQty=l=>l.sources.filter(s=>s.t==='stock').reduce((x,s)=>x+s.qty,0);
-  const needQty=l=>l.sources.filter(s=>s.t!=='stock'&&s.t!=='alloc'&&s.t!=='mirror'&&s.t!=='pipe').reduce((x,s)=>x+s.qty,0);
+  const needQty=l=>l.sources.filter(s=>s.t!=='stock'&&s.t!=='alloc'&&s.t!=='mirror'&&s.t!=='pipe'&&s.t!=='ohstock').reduce((x,s)=>x+s.qty,0);
   const pk=ln=>(ln.made&&SET.share?'ALL':ln.co)+'|'+ln.base;
   ORDERS.forEach(o=>{
     if(o.ic||!(o.status==='late'||o.status==='risk'||o.status==='covered'))return;
@@ -764,6 +779,7 @@ function srcChip(s,ln){
   switch(s.t){
     case 'alloc':return `<span class="src alloc"><b>${q}</b> allocated in Sage</span>`;
     case 'stock':return `<span class="src stock"><b>${q}</b> in stock${ln&&ln.contested?' &#9888;':''}</span>`;
+    case 'ohstock':return `<span class="src stock" title="Tibard buys this code from Oliver Harvey. The warehouse picks OH's stock and despatches it in Tibard; Sage raises the Tibard PO on OLIVER overnight, after the despatch."><b>${q}</b> OH stock <span class="d">· picked from OH shelf, Tibard PO raised after despatch</span></span>`;
     case 'mirror':return `<span class="src done">intercompany mirror – see the OH order</span>`;
     case 'pipe':return `<span class="src stock" title="Marked complete on the production planner; counts as stock until 7am the day after"><b>${q}</b> made${s.sm?' (special make)':''} – awaiting Sage book-in <span class="d">· ${esc(s.ref)} completed ${fd(pd(s.completed))}</span></span>`;
     case 'wo':return `<span class="src wo"><b>${q}</b> on ${esc(s.ref)}${s.sm?' (special make)':''}${s.embOnly?' (EMB)':''} <span class="d">· due ${dueTxt(s.ref,s.due)}${s.overdue?' · <b>overdue</b>':''}${s.printed===false?' · not printed':''}</span>${dueBtn(s.ref)}</span>`;
@@ -876,7 +892,7 @@ function orderCard(o){
   let why='',cls='ok';
   if(o.status==='done')why='<b>Fully despatched.</b>';
   else if(o.status==='hold')why='<b>On hold in Sage.</b> Nothing is set against it until it is released.';
-  else if(o.status==='stock')why=`<b>Everything outstanding is in stock${o.contested?', but some of it is contested':''}.</b> ${fmt(o.outQty)} units on ${o.outLines} line${o.outLines>1?'s':''} can be picked now.`;
+  else if(o.status==='stock')why=`<b>Everything outstanding is in stock${o.contested?', but some of it is contested':''}.</b> ${fmt(o.outQty)} units on ${o.outLines} line${o.outLines>1?'s':''} can be picked now.${o.ohStock?` ${fmt(o.ohStock)} of them are Oliver Harvey stock: the warehouse picks from the OH shelf and Sage raises the Tibard PO on OLIVER after the despatch, so no PO shows yet.`:''}`;
   else{
     const shorts=o.waiting.filter(l=>l.status==='short');const risky=o.waiting.filter(l=>l.status==='risk'||(l.status==='late'&&(l.unknown||(l.promD&&l.expected&&l.expected>l.promD))));
     const okWait=o.waiting.filter(l=>l.status==='covered');
@@ -918,7 +934,7 @@ function lineDetail(ln){
   const p=POOLS.get(key);
   if(ln.out<=0)return '<div class="det"><span class="sm">Despatched line.</span></div>';
   if(!p)return `<div class="det"><span class="sm">${ln.charge?'Charge line – never holds an order up.':ln.hold?'Order on hold – not in the stock queue.':'No queue for this code.'}</span></div>`;
-  let h=`<div class="det"><h4>${esc(ln.base)} · ${ln.made?'made in house':'bought in'} · stock ${fmt(p.stock)}${p.stockBits.length?' ('+esc(p.stockBits.join(', '))+')':''}`;
+  let h=`<div class="det"><h4>${esc(ln.base)} · ${ln.made?'made in house':'bought in'} · stock ${fmt(p.stock)}${p.stockBits.length?' ('+esc(p.stockBits.join(', '))+')':''}${p.fromOH?' · bought from OH, OH shelf stock free for Tibard '+fmt(p.ohStock):''}`;
   if(p.wos.length)h+=` · works orders: ${p.wos.map(w=>esc(w.w.ref)+' '+fmt(w.w.items.filter(i=>baseCode(i.code)===ln.base).reduce((x,i)=>x+i.qty,0))+' due '+dueTxt(w.w.ref,w.w.due)+dueBtn(w.w.ref)).join(', ')}`;
   if(p.conts.length)h+=` · containers: ${p.conts.map(c=>esc(c.c.ref)+' '+fmt(c.c.items.filter(i=>baseCode(i.code)===ln.base).reduce((x,i)=>x+i.qty,0))+' lands '+fd(pd(c.c.date))).join(', ')}`;
   if(p.pos.length)h+=` · POs: ${p.pos.map(x=>'PO '+esc(soNo(x.src.doc))+' '+fmt(x.src.out)+' '+esc(x.src.acctName||'')+' '+(x.date?fd(x.date):'no date')).join(', ')}`;
@@ -1078,7 +1094,7 @@ function renderData(v){
   <b>Works orders</b>: production planner, ${PP.ok?'published '+fdt(PP.savedAt)+' · '+PP.wos.length+' live works orders · '+(PP.pipe.reduce((x,c)=>x+c.qty,0)+[...PP.smPipe.values()].reduce((x,a)=>x+a.reduce((y,c)=>y+c.qty,0),0))+' units completed, awaiting Sage book-in (pipeline until 7am next day) · SOP demand pasted '+fdt(PP.sopAt):'<span style="color:var(--red)">not read ('+esc(PP.err)+')</span>'}.<br>
   <b>Can't part ship</b>: ${NPS.ok?NPS.customers.length+' customers from no-part-ship.json'+(NPS.updated?' (updated '+NPS.updated+')':'')+(NPS.local?' – <span style="color:var(--amber)">list saved on this PC, not yet written to GitHub</span>':''):'<span style="color:var(--red)">not read ('+esc(NPS.err)+')</span>'} · ${liveOrders().filter(o=>o.noPart).length} live orders flagged.<br>
   <b>Containers</b>: stock planner, ${SP.ok?'published '+fdt(SP.savedAt)+' · '+SP.cPOs.map(c=>esc(c.ref)+' lands '+fd(pd(c.date))).join(', ')+(SP.nextContDate?' · next order date '+fd(pd(SP.nextContDate)):''):'<span style="color:var(--red)">not read ('+esc(SP.err)+')</span>'}.<br><br>
-  <b>Who gets the stock</b>: Sage allocation first, then free stock to the oldest promised date, then units already made on a completed works order but not yet booked into Sage (the planner's pipeline, until 7am the next day), then a special-make works order raised for the line, the back-to-back PO Sage generated from the order, live works orders (oldest raised first), containers in landing order, and purchase orders by date. Made-in-house codes${SET.share?' share Tibard, BULK and OH stock as one pool':' are per company'}; bought-in codes are per company. Held orders ${SET.holdSO?'count as':'do not take'} demand.<br><br>
+  <b>Who gets the stock</b>: Sage allocation first, then free stock to the oldest promised date, then units already made on a completed works order but not yet booked into Sage (the planner's pipeline, until 7am the next day), then a special-make works order raised for the line, the back-to-back PO Sage generated from the order, live works orders (oldest raised first), containers in landing order, and purchase orders by date. Made-in-house codes${SET.share?' share Tibard, BULK and OH stock as one pool':' are per company'}; bought-in codes are per company, except that a Tibard code bought from Oliver Harvey (preferred supplier OLIVER) is covered by OH's shelf stock once OH's own orders are served, because the warehouse picks it from OH and Sage raises the Tibard PO after the despatch (v2.10). Held orders ${SET.holdSO?'count as':'do not take'} demand.<br><br>
   <b>Version</b> ${APP_VER}. Order tracker, Tibard Apps. Tomorrow: this paste is replaced by the live Sage link when the apps move on-prem.
   </div></div>`;
 }

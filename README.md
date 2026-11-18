@@ -119,6 +119,14 @@ orders, containers) and nothing else.
 
 ## Changelog
 
+- v2.10 (18 Nov 2026) – Tibard codes bought from Oliver Harvey (Sage
+  preferred supplier OLIVER, e.g. clogs) are covered by OH's shelf stock.
+  The warehouse picks OH stock and despatches it in Tibard; Sage's overnight
+  routine raises the Tibard→OH back-to-back PO afterwards, so these lines
+  used to show "not on order – needs a PO" and land on the no-PO tile. They
+  now show **OH stock** (counted as in stock, after OH's own orders take
+  what they need); only the part OH cannot cover is still flagged. No query
+  or layout change.
 - v2.9 (17 Nov 2026) – customers that cannot take part despatches (Sage
   flag, 42 accounts from the Sage report) are listed in `no-part-ship.json`;
   their orders get a ⛔ No part ship pill and light red rows everywhere, a
