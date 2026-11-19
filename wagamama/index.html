@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Wagamama code switch</title>
+<!-- Changelog: 2026-11-19 v1.1 - Publish for team: the editor's daily paste of wagamama_live.sql goes to wagamama/data.json, which view-only PCs read first. -->
 <!-- Changelog: 2026-11-19 v1.0 - first build. Sales office dashboard for Wagamama T-shirt orders: which open
      lines are short on the code the customer ordered, which alternative code (same size, or a size up/down) has the
      stock, switch-in-Sage checklist, and Sage write-off / add-stock files for stock moved between codes. Reads the
@@ -113,7 +114,9 @@ input.find{border:1px solid var(--line);border-radius:6px;padding:8px 11px;font-
   <div class="status" id="hdrStatus">Loading…</div>
   <span id="modeBadge" class="mode"></span>
   <button class="btn btn-ghost edit-only" onclick="showTab('data')">Data &amp; settings</button>
-  <button class="btn btn-gold edit-only" id="pubBtn" onclick="publishDecisions()" title="Puts decisions.json into the repo so every PC sees the same switches and transfers">&#128228; Publish decisions</button>
+  <button class="btn btn-gold edit-only" onclick="showTab('data')">Paste today's data</button>
+  <button class="btn btn-g edit-only" id="pubDataBtn" onclick="publishData()" title="Puts your paste into wagamama/data.json so every view-only PC sees it">&#128228; Publish for team</button>
+  <button class="btn btn-ghost edit-only" id="pubBtn" onclick="publishDecisions()" title="Puts decisions.json into the repo so every PC sees the same switches and transfers">Publish decisions</button>
 </header>
 
 <nav class="tabs" id="tabs">
@@ -182,8 +185,8 @@ input.find{border:1px solid var(--line);border-radius:6px;padding:8px 11px;font-
 <section class="view" id="v-data">
   <div class="card"><h2>Where the data comes from</h2><div class="pad" id="srcInfo"></div></div>
 
-  <div class="card edit-only" style="display:none"><h2>Paste today's data (optional)</h2><div class="pad">
-    <div class="note">Normally nothing to do: the dashboard reads the Order tracker's published data every time it opens. Paste here only when you have run <b>wagamama_live.sql</b> in SQL 1.xlsx (it lists every WAGTS stock code, not just the ones on orders). Copy columns A to AD without the header.</div>
+  <div class="card edit-only" style="display:none"><h2>Paste today's data</h2><div class="pad">
+    <div class="note">Daily: run <b>wagamama_live.sql</b> in SQL 1.xlsx, copy columns A to AD without the header, paste here, <b>Use this paste</b>, then <b>Publish for team</b> (header). View-only PCs read the published copy; until something is published they fall back to the Order tracker's feed.</div>
     <textarea id="pasteBox" placeholder="Paste here…"></textarea>
     <div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap"><button class="btn btn-p" onclick="applyPaste()">Use this paste</button><button class="btn btn-o" onclick="clearPaste()">Forget paste, use the tracker feed</button></div>
   </div></div>
@@ -218,7 +221,7 @@ input.find{border:1px solid var(--line);border-radius:6px;padding:8px 11px;font-
 
 <script>
 /* ============================ constants ============================ */
-const VER='1.0';
+const VER='1.1';
 const IS_EDITOR=/[?&]edit\b/.test(location.search);
 const SOP_DATA='../data.json';                 // Order tracker feed, same GitHub Pages origin
 const OWN_DATA='data.json';                    // optional published paste from wagamama_live.sql
@@ -447,7 +450,7 @@ function renderAll(){const q=(document.getElementById('findIn').value||'').trim(
 function renderData(){
   document.getElementById('srcInfo').innerHTML='<div style="font-size:13px;line-height:1.7">'+
     '<b>Now showing:</b> '+(SRC.kind?esc(SRC.kind)+' from '+esc(fmtTs(SRC.ts)):'nothing loaded')+(SRC.note?'<div class="desc">'+esc(SRC.note)+'</div>':'')+
-    '<div class="desc" style="margin-top:6px">Order tracker feed = the sales manager\'s daily paste of ordertracker_live.sql published to SOPtracker/data.json. It carries every live Wagamama order line and the stock record of every WAGTS code (all WAGTS stock items since tracker v2.9). '+
+    '<div class="desc" style="margin-top:6px">Published Wagamama paste = wagamama_live.sql pasted and published from the editor PC (preferred). Order tracker feed = the daily ordertracker_live.sql paste in SOPtracker/data.json, used when it is newer or nothing has been published (every WAGTS stock item only from tracker SQL v2.9). '+
     'Lines: '+M.lines.length+' open · stock codes: '+Object.keys(M.stk).length+' · PO lines: '+DATA.po.length+'.</div></div>';
   document.getElementById('setActive').value=SET.active.join('\n');
   document.getElementById('setColours').value=Object.entries(SET.colours).map(([k,v])=>k+' = '+v).join('\n');
@@ -478,6 +481,16 @@ function publishDecisions(){const tok=pubToken();const body=JSON.stringify({app:
     fetch(PUB_API+DEC_FILE,{method:'PUT',headers,body:JSON.stringify({message:'Wagamama decisions published '+new Date().toISOString().slice(0,16).replace('T',' '),content:btoa(unescape(encodeURIComponent(body))),sha:cur.sha})}))
   .then(r=>{if(!r.ok)throw new Error('GitHub said '+r.status);document.getElementById('pubBtn').textContent='📤 Publish decisions';if(msg)msg.textContent='Published '+fmtTs(new Date().toISOString())+'. Other PCs see it within a minute.';alert('Decisions published for the team.')})
   .catch(e=>{alert('Publish failed: '+e.message+'. Check the token has Contents read/write on SOPtracker.')});
+}
+function publishData(){let raw='',ts='';try{raw=localStorage.getItem(LS.raw)||'';ts=localStorage.getItem(LS.ts)||''}catch(e){}
+  if(!raw){alert('Nothing pasted on this PC yet. Paste today\'s data first (Data tab).');return}
+  const body=JSON.stringify({app:'wagamama',ver:VER,raw,ts,savedAt:new Date().toISOString()});const tok=pubToken();
+  if(!tok){dl('data.json',body);alert('No publishing token on this PC: data.json downloaded. Upload it to SOPtracker/wagamama/ in GitHub, or add a token under Data & settings.');return}
+  const headers={Authorization:'Bearer '+tok,Accept:'application/vnd.github+json'};const b=document.getElementById('pubDataBtn');b.disabled=true;
+  fetch(PUB_API+OWN_DATA+'?t='+Date.now(),{headers,cache:'no-store'}).then(r=>r.ok?r.json():{}).then(cur=>
+    fetch(PUB_API+OWN_DATA,{method:'PUT',headers,body:JSON.stringify({message:'Wagamama data published '+new Date().toISOString().slice(0,16).replace('T',' '),content:btoa(unescape(encodeURIComponent(body))),sha:cur.sha})}))
+  .then(r=>{if(!r.ok)throw new Error('GitHub said '+r.status);b.disabled=false;alert('Published for the team. View-only PCs see it within a minute.')})
+  .catch(e=>{b.disabled=false;alert('Publish failed: '+e.message+'. Check the token has Contents read/write on SOPtracker.')});
 }
 function clearDecisions(){if(!confirm('Clear every switch and transfer decision on this PC? (Published decisions are reloaded next time the page opens.)'))return;DEC={};saveDecisions();rebuild()}
 function mergeDecisions(remote){let changed=false;Object.entries(remote||{}).forEach(([k,d])=>{const l=DEC[k];if(!l||(d.when||'')>(l.when||'')||(d.done&&!l.done)||(d.imported&&!l.imported)){DEC[k]=d;changed=true}});if(changed)lsSet(LS.dec,DEC)}
