@@ -416,7 +416,13 @@ OPTION (RECOMPILE);
 INSERT INTO @codes0 (Company, ProductCode)
 SELECT Company, ProductCode FROM @so
 UNION
-SELECT Company, ProductCode FROM @po;
+SELECT Company, ProductCode FROM @po
+UNION
+/* v2.9 (19 Nov 2026): every Wagamama T-shirt code, on an order or not, so the
+   Wagamama code-switch dashboard (wagamama/) can see an alternative code that
+   has stock even when nobody is ordering it. */
+SELECT 'TIBARD', LTRIM(RTRIM(Code)) COLLATE DATABASE_DEFAULT
+FROM   S200_LIVE.dbo.StockItem WHERE Code LIKE 'WAGTS%';
 
 INSERT INTO @codes (Company, ProductCode)
 SELECT 'TIBARD', a.ProductCode
