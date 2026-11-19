@@ -210,3 +210,17 @@ orders, containers) and nothing else.
   and run without locks.
 - v1.0 (6 Nov 2026) – first version: find an order, late & at risk in three
   groups, can jump the queue, all live orders, Sage paste + planner data.
+
+## Wagamama code switch (wagamama/)
+
+`wagamama/index.html` is a sales office dashboard for the Wagamama T-shirt
+codes: https://luke5446.github.io/SOPtracker/wagamama/ (`?edit` for the
+editor). It reads this repo's published `data.json` (so there is nothing extra
+to paste) and shows every open Wagamama line that is short on the code the
+customer ordered, which alternative code in the same colour and sleeve length
+has the stock (same size first, then a size up or down), a "Switch in Sage"
+checklist, and Sage write-off / add-stock files for stock moved between codes.
+Decisions are published to `wagamama/decisions.json` with the same token.
+`wagamama/wagamama_live.sql` is a stand-alone Wagamama-only version of the
+query for SQL 1.xlsx. From tracker SQL v2.9 (19 Nov 2026) `ordertracker_live.sql`
+returns a STK row for every WAGTS stock item, on an order or not.

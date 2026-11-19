@@ -1,0 +1,516 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Wagamama code switch</title>
+<!-- Changelog: 2026-11-19 v1.1 - Publish for team: the editor's daily paste of wagamama_live.sql goes to wagamama/data.json, which view-only PCs read first. -->
+<!-- Changelog: 2026-11-19 v1.0 - first build. Sales office dashboard for Wagamama T-shirt orders: which open
+     lines are short on the code the customer ordered, which alternative code (same size, or a size up/down) has the
+     stock, switch-in-Sage checklist, and Sage write-off / add-stock files for stock moved between codes. Reads the
+     Order tracker's published data.json (../data.json) by default, or a paste from wagamama_live.sql. -->
+<style>
+:root{
+  --navy:#1F3864; --navy2:#2a4a80; --steel:#5b7ba6; --gold:#C9A24B;
+  --bg:#f4f6f9; --card:#ffffff; --line:#dfe4ec; --txt:#1c2431; --mut:#6b7686;
+  --red:#c0392b; --green:#1e7e46; --amber:#b7791f;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Segoe UI',Arial,sans-serif;background:var(--bg);color:var(--txt);min-height:100vh}
+header{background:var(--navy);color:#fff;padding:12px 18px;display:flex;align-items:center;gap:14px;flex-wrap:wrap}
+header img{height:38px;background:#fff;border-radius:6px;padding:3px 9px}
+header h1{font-size:19px;font-weight:600;letter-spacing:.3px}
+header h1 span{color:var(--gold)}
+header .sub{font-size:12px;opacity:.75}
+header .spacer{flex:1}
+.status{font-size:12px;opacity:.85;text-align:right;max-width:340px}
+.mode{font-size:10px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;border:1px solid rgba(255,255,255,.4);border-radius:10px;padding:2px 8px}
+.btn{border:none;border-radius:6px;padding:8px 14px;font-size:13px;cursor:pointer;font-weight:600;white-space:nowrap}
+.btn:disabled{opacity:.5;cursor:default}
+.btn-gold{background:var(--gold);color:#22262e}
+.btn-ghost{background:transparent;color:#fff;border:1px solid rgba(255,255,255,.35)}
+.btn-ghost:hover{border-color:#fff}
+.btn-p{background:var(--navy);color:#fff}
+.btn-o{background:#fff;color:var(--navy);border:1px solid var(--line)}
+.btn-g{background:var(--green);color:#fff}
+.btn-r{background:#fff;color:var(--red);border:1px solid #f0c9c4}
+.btn-sm{font-size:11.5px;padding:4px 9px}
+.edit-only{display:none} body.editor .edit-only{display:inline-block}
+nav.tabs{background:#fff;border-bottom:1px solid var(--line);display:flex;gap:2px;padding:0 10px;overflow-x:auto}
+nav.tabs button{background:none;border:none;border-bottom:3px solid transparent;padding:12px 14px;font-size:13.5px;font-weight:600;color:var(--mut);cursor:pointer;white-space:nowrap}
+nav.tabs button.on{color:var(--navy);border-bottom-color:var(--gold)}
+nav.tabs .n{display:inline-block;margin-left:6px;background:#eef3fb;color:var(--steel);border-radius:10px;padding:1px 7px;font-size:11px}
+nav.tabs .n.hot{background:#fbe9e7;color:var(--red)}
+main{max-width:1240px;margin:0 auto;padding:16px 16px 70px}
+.view{display:none}.view.on{display:block}
+.card{background:var(--card);border:1px solid var(--line);border-radius:10px;margin-top:14px;box-shadow:0 1px 3px rgba(20,30,50,.06);overflow:hidden}
+.card h2{font-size:14px;padding:11px 14px;border-bottom:1px solid var(--line);color:var(--navy);display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.card h2 .r{margin-left:auto;font-size:12px;font-weight:400;color:var(--mut)}
+.pad{padding:12px 14px}
+.tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-top:14px}
+.tile{background:#fff;border:1px solid var(--line);border-radius:10px;padding:12px 14px;cursor:pointer}
+.tile .l{font-size:11px;font-weight:700;color:var(--mut);text-transform:uppercase;letter-spacing:.4px}
+.tile .v{font-size:26px;font-weight:800;color:var(--navy);margin-top:4px}
+.tile .v.red{color:var(--red)} .tile .v.amber{color:var(--amber)} .tile .v.green{color:var(--green)}
+.tile .s{font-size:11.5px;color:var(--mut);margin-top:2px}
+.tw{overflow-x:auto}
+table{width:100%;border-collapse:collapse;font-size:13px}
+th{background:#f7f9fc;text-align:left;padding:8px 10px;font-size:11px;text-transform:uppercase;letter-spacing:.4px;color:var(--mut);border-bottom:1px solid var(--line);white-space:nowrap}
+td{padding:8px 10px;border-bottom:1px solid #eef1f6;vertical-align:top}
+td.num,th.num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+.code{font-family:Consolas,monospace;font-weight:700;color:var(--navy);font-size:12.5px;white-space:nowrap}
+.desc{font-size:11.5px;color:var(--mut);margin-top:2px}
+.badge{display:inline-block;font-size:10px;font-weight:700;padding:2px 7px;border-radius:10px;background:#eef3fb;color:var(--steel);vertical-align:middle;white-space:nowrap}
+.badge.red{background:#fbe9e7;color:var(--red)} .badge.green{background:#e6f4ea;color:var(--green)} .badge.amber{background:#fdf3e1;color:var(--amber)} .badge.gold{background:#f7efdc;color:#7a5c12}
+.ohead{background:#f7f9fc;border-top:2px solid var(--line)}
+.ohead td{padding:9px 10px;font-size:13px}
+.ohead b{color:var(--navy)}
+.pick{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--line);border-radius:8px;padding:4px 8px;margin:2px 4px 2px 0;background:#fff;font-size:12.5px}
+.pick .code{font-size:12px}
+.pick.alt{border-color:#e4d4a8;background:#fdf9ee}
+.pick.none{border-style:dashed;color:var(--mut)}
+.pick select,.pick input{border:1px solid var(--line);border-radius:5px;padding:2px 4px;font-size:12px}
+.pick input{width:52px;text-align:right}
+.acts{white-space:nowrap}
+.acts .btn{margin:1px 2px}
+.note{font-size:11.5px;color:var(--mut);background:#f7f9fc;border-left:3px solid var(--gold);padding:8px 10px;border-radius:0 6px 6px 0;margin:10px 0;line-height:1.5}
+.grid{border-collapse:separate;border-spacing:0}
+.grid th.fam{text-align:left;background:#fff}
+.grid td.cell{padding:5px 6px;min-width:96px;border-left:1px solid #eef1f6}
+.cc{display:block;border-radius:6px;padding:4px 6px;margin:2px 0;font-size:11.5px;line-height:1.3;border:1px solid var(--line)}
+.cc .code{display:block;font-size:11px}
+.cc.ok{background:#e6f4ea;border-color:#bfe3c9} .cc.po{background:#fdf3e1;border-color:#f0d8a4} .cc.zero{background:#f6f7f9;color:var(--mut)} .cc.neg{background:#fbe9e7;border-color:#f0c9c4}
+.cc.old{opacity:.75} .cc .tag{font-size:9.5px;font-weight:700;letter-spacing:.04em;text-transform:uppercase}
+.famrow td.need{font-weight:700;color:var(--red);text-align:center}
+textarea{width:100%;min-height:140px;border:1px solid var(--line);border-radius:6px;padding:8px;font-family:Consolas,monospace;font-size:12px}
+input.find{border:1px solid var(--line);border-radius:6px;padding:8px 11px;font-size:14px;width:100%;max-width:420px}
+.field{display:flex;flex-direction:column;gap:4px;margin:8px 0}
+.field label{font-size:11px;font-weight:600;color:var(--mut);text-transform:uppercase;letter-spacing:.4px}
+.field input,.field textarea{border:1px solid var(--line);border-radius:6px;padding:7px 9px;font-size:13px}
+.field textarea{min-height:80px}
+.empty{padding:28px;text-align:center;color:var(--mut)}
+.late{color:var(--red);font-weight:700}
+.filters{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:14px}
+.chip{border:1px solid var(--line);background:#fff;border-radius:14px;padding:5px 11px;font-size:12.5px;cursor:pointer;font-weight:600;color:var(--mut)}
+.chip.on{background:var(--navy);color:#fff;border-color:var(--navy)}
+.done td{opacity:.55;text-decoration:line-through}
+.done td.acts{text-decoration:none}
+@media (max-width:720px){
+  header{padding:10px 12px} header .sub{display:none} .status{display:none}
+  main{padding:10px 10px 70px} td,th{padding:7px 6px} .acts .btn{display:block;width:100%;margin:2px 0}
+}
+@media print{header .btn,nav.tabs,.acts,.filters{display:none!important}}
+</style>
+</head>
+<body>
+
+<header>
+  <img id="logo" alt="Tibard" src="data:image/jpeg;base64,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">
+  <div>
+    <h1>Wagamama <span>code switch</span></h1>
+    <div class="sub">Sales office – T-shirt lines short on the code ordered, and which code has the stock</div>
+  </div>
+  <div class="spacer"></div>
+  <div class="status" id="hdrStatus">Loading…</div>
+  <span id="modeBadge" class="mode"></span>
+  <button class="btn btn-ghost edit-only" onclick="showTab('data')">Data &amp; settings</button>
+  <button class="btn btn-gold edit-only" onclick="showTab('data')">Paste today's data</button>
+  <button class="btn btn-g edit-only" id="pubDataBtn" onclick="publishData()" title="Puts your paste into wagamama/data.json so every view-only PC sees it">&#128228; Publish for team</button>
+  <button class="btn btn-ghost edit-only" id="pubBtn" onclick="publishDecisions()" title="Puts decisions.json into the repo so every PC sees the same switches and transfers">Publish decisions</button>
+</header>
+
+<nav class="tabs" id="tabs">
+  <button data-t="action" class="on">Needs action<span class="n" id="n-action">0</span></button>
+  <button data-t="grid">Stock by size</button>
+  <button data-t="switch">Switch in Sage<span class="n" id="n-switch">0</span></button>
+  <button data-t="transfer">Stock transfer files<span class="n" id="n-transfer">0</span></button>
+  <button data-t="all">All Wagamama lines<span class="n" id="n-all">0</span></button>
+  <button data-t="data">Data</button>
+</nav>
+
+<main>
+<!-- ===================== NEEDS ACTION ===================== -->
+<section class="view on" id="v-action">
+  <div class="tiles" id="tiles"></div>
+  <div class="filters" id="actFilters">
+    <span class="chip on" data-f="all">All short lines</span>
+    <span class="chip" data-f="old">Ordered on an old code</span>
+    <span class="chip" data-f="alt">Alternative available</span>
+    <span class="chip" data-f="size">Only a size up/down</span>
+    <span class="chip" data-f="none">Nothing in stock</span>
+    <span class="chip" data-f="late">Late</span>
+  </div>
+  <div class="note">A line is <b>short</b> when the stock on the code ordered, shared out to the oldest promised date first, does not cover it.
+    The suggestion is the code in the same colour and sleeve length with the most free stock: same size first, then a size up or down.
+    <b>Switch in Sage</b> = amend the order line to the other code (goes on the Switch list). <b>Transfer stock</b> = move the garments onto the ordered code instead,
+    with a Sage write-off and add-stock file (goes on the Stock transfer files tab). Codes not on IT's current list are flagged <span class="badge amber">old code</span>.</div>
+  <div class="card"><div class="tw"><table id="actTable"><thead><tr>
+    <th>Order / line</th><th>Code ordered</th><th class="num">Need</th><th>Stock on code</th><th>Suggested cover</th><th class="acts edit-only">Decide</th></tr></thead><tbody></tbody></table></div></div>
+</section>
+
+<!-- ===================== STOCK GRID ===================== -->
+<section class="view" id="v-grid">
+  <div class="note">Each cell lists every code in that colour / sleeve / size. <b>Free</b> = in stock minus what live Wagamama orders already need on that code (oldest first), then <b>PO</b> = on purchase order.
+    Green has free stock, amber only has stock on PO, grey has nothing. The red <b>Short</b> row is the demand nothing covers after the suggestions above. Faded codes are not on IT's current code list.</div>
+  <div class="card"><div class="tw" id="gridWrap"></div></div>
+</section>
+
+<!-- ===================== SWITCH LIST ===================== -->
+<section class="view" id="v-switch">
+  <div class="note">Lines the office has decided to amend in Sage: delete the line on the old code and add the new code for the same quantity and price (Sage has no bulk edit, see the Data tab). Tick each one once Sage is changed; it drops off when tomorrow's data shows the new code.</div>
+  <div class="card"><h2>To amend in Sage <span class="r" id="swCount"></span><button class="btn btn-o btn-sm" onclick="copySwitchList()">Copy list</button></h2>
+    <div class="tw"><table id="swTable"><thead><tr><th>Order</th><th>Customer</th><th>Line</th><th>Old code</th><th>New code</th><th class="num">Qty</th><th>Decided</th><th class="acts edit-only"></th></tr></thead><tbody></tbody></table></div></div>
+</section>
+
+<!-- ===================== TRANSFER FILES ===================== -->
+<section class="view" id="v-transfer">
+  <div class="note">Garments moved from an alternative code onto the code the customer ordered, so the order picks and despatches as it stands. Two Sage import files per batch:
+    <b>Write-off</b> (TIB write-off layout, Manual Reduction, Reference1 <code id="refOff"></code>, Reference2 = order number) and <b>Add stock</b> (TIB_Add_Stock layout, Reference1 <code id="refAdd"></code> + order number, max 20 characters).
+    Export both, import them in Sage, then press <b>Mark imported</b>. Allocation on the order follows in Sage.</div>
+  <div class="card"><h2>Waiting to import <span class="r" id="trCount"></span>
+    <button class="btn btn-p btn-sm edit-only" onclick="exportTransfers('off')">&#8681; Write-off file</button>
+    <button class="btn btn-p btn-sm edit-only" onclick="exportTransfers('add')">&#8681; Add-stock file</button>
+    <button class="btn btn-g btn-sm edit-only" onclick="markImported()">&#10003; Mark imported</button></h2>
+    <div class="tw"><table id="trTable"><thead><tr><th>Order</th><th>Customer</th><th>Write off (from)</th><th>Add stock (to)</th><th class="num">Qty</th><th>Decided</th><th class="acts edit-only"></th></tr></thead><tbody></tbody></table></div></div>
+  <div class="card"><h2>Imported batches <span class="r" id="trHistCount"></span></h2><div class="tw"><table id="trHist"><thead><tr><th>Imported</th><th>Order</th><th>From</th><th>To</th><th class="num">Qty</th></tr></thead><tbody></tbody></table></div></div>
+</section>
+
+<!-- ===================== ALL LINES ===================== -->
+<section class="view" id="v-all">
+  <div class="filters"><input class="find" id="findIn" placeholder="Order number, customer, code or size…" oninput="renderAll()"></div>
+  <div class="card"><div class="tw"><table id="allTable"><thead><tr><th>Order</th><th>Customer</th><th>Promised</th><th>Code</th><th class="num">Ordered</th><th class="num">Outstanding</th><th>Cover</th></tr></thead><tbody></tbody></table></div></div>
+</section>
+
+<!-- ===================== DATA ===================== -->
+<section class="view" id="v-data">
+  <div class="card"><h2>Where the data comes from</h2><div class="pad" id="srcInfo"></div></div>
+
+  <div class="card edit-only" style="display:none"><h2>Paste today's data</h2><div class="pad">
+    <div class="note">Daily: run <b>wagamama_live.sql</b> in SQL 1.xlsx, copy columns A to AD without the header, paste here, <b>Use this paste</b>, then <b>Publish for team</b> (header). View-only PCs read the published copy; until something is published they fall back to the Order tracker's feed.</div>
+    <textarea id="pasteBox" placeholder="Paste here…"></textarea>
+    <div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap"><button class="btn btn-p" onclick="applyPaste()">Use this paste</button><button class="btn btn-o" onclick="clearPaste()">Forget paste, use the tracker feed</button></div>
+  </div></div>
+
+  <div class="card edit-only" style="display:none"><h2>Settings</h2><div class="pad">
+    <div class="field"><label>Current codes (IT's list, one per line). Anything ordered on a code not listed is flagged "old code"</label><textarea id="setActive" style="min-height:160px"></textarea></div>
+    <div class="field"><label>Colour families: colour suffix = family name</label><textarea id="setColours"></textarea></div>
+    <div class="field"><label>Sleeve by style when the description has no S/S or L/S: style = SS or LS</label><textarea id="setSleeve"></textarea></div>
+    <div class="field"><label>Write-off Reference1 (max 20)</label><input id="setRefOff" maxlength="20"></div>
+    <div class="field"><label>Add-stock Reference1 prefix (order number is added, 20 max in total)</label><input id="setRefAdd" maxlength="12"></div>
+    <div class="field"><label>Stock location in the import files</label><input id="setLoc"></div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn btn-p" onclick="saveSettings()">Save settings</button><button class="btn btn-o" onclick="resetSettings()">Back to defaults</button></div>
+  </div></div>
+
+  <div class="card edit-only" style="display:none"><h2>Publishing</h2><div class="pad">
+    <div class="note">Decisions (switches, transfers, imported batches) are kept on this PC and published to <code>wagamama/decisions.json</code> in the SOPtracker repo so every PC in the office sees them. The Order tracker's publishing token on this PC is used; if there is none, paste one below (Contents: read and write on SOPtracker).</div>
+    <div class="field"><label>GitHub token for this PC</label><input id="setToken" type="password" placeholder="(kept)"></div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn btn-p" onclick="saveToken()">Save token</button><button class="btn btn-gold" onclick="publishDecisions()">Publish decisions now</button><button class="btn btn-r" onclick="clearDecisions()">Clear all decisions on this PC</button></div>
+    <div id="pubMsg" class="desc" style="margin-top:8px"></div>
+  </div></div>
+
+  <div class="card"><h2>Bulk changing sales order lines in Sage 200</h2><div class="pad" style="font-size:13px;line-height:1.6">
+    Sage 200 Professional has no bulk amend for sales order lines. The sales order import only creates new orders, the item code on an existing line cannot be edited (the line is deleted and re-added), and writing to <code>SOPOrderReturnLine</code> in SQL is unsupported and breaks allocations. That leaves three routes:
+    <ol style="margin:6px 0 0 20px">
+      <li><b>Transfer the stock instead of the order</b> (this app's Stock transfer files): write the garments off the alternative code and add them to the ordered code. The order then allocates and despatches unchanged. Best while the customer's portal still sends old codes.</li>
+      <li><b>Amend line by line</b> from the Switch in Sage list when the customer should see the new code on the invoice.</li>
+      <li><b>Fix it at source</b>: ask Wagamama / the portal to map to the current codes, or set the old codes to inactive in Sage so the import rejects them.</li>
+    </ol>
+  </div></div>
+</section>
+</main>
+
+<script>
+/* ============================ constants ============================ */
+const VER='1.1';
+const IS_EDITOR=/[?&]edit\b/.test(location.search);
+const SOP_DATA='../data.json';                 // Order tracker feed, same GitHub Pages origin
+const OWN_DATA='data.json';                    // optional published paste from wagamama_live.sql
+const DEC_FILE='decisions.json';
+const PUB_REPO='Luke5446/SOPtracker', PUB_API='https://api.github.com/repos/'+PUB_REPO+'/contents/wagamama/';
+const LS={raw:'wag_raw',ts:'wag_ts',set:'wag_settings',dec:'wag_decisions',tok:'wag_token',sopTok:'ordertracker_token'};
+const SIZES=['XXS','XS','S','M','L','XL','XXL','3XL'];
+const SIZE_CODE={XXS:'XXS',XS:'XS',SS:'S',MM:'M',LL:'L',XL:'XL',XXL:'XXL','3XL':'3XL',XX:'XXL'};
+const SAGE_REF_MAX=20;
+const DEFAULTS={
+  active:['WAGTSSX750XS03','WAGTSSX750XXS03','WAGTS012LL03','WAGTS012MM03','WAGTS012SS03','WAGTS012XL03','WAGTS012XS03','WAGTS012XXL03','WAGTS012XXS03',
+    'WAGTS0113XL03','WAGTS011LL03','WAGTS011MM03','WAGTS011SS03','WAGTS011XL03','WAGTS011XS03','WAGTS011XXL03','WAGTS011XXS03',
+    'WAGTSSX750LL153','WAGTSSX750MM153','WAGTSSX750SS153','WAGTSSX750XL153','WAGTSSX750XXL153',
+    'WAGTS012LL689','WAGTS012MM689','WAGTS012SS689','WAGTS012XL689','WAGTS012XS689','WAGTS012XXL689','WAGTS009XS689','WAGTS009XXS689',
+    'WAGTS0113XL689','WAGTS011LL689','WAGTS011MM689','WAGTS011SS689','WAGTS011XL689','WAGTS011XS689','WAGTS011XXL689','WAGTS008XS689','WAGTS008XXS689'],
+  colours:{'03':'Black','689':'Green','884':'Green','153':'Green','721':'Green','351':'Grey','128':'Grey'},
+  sleeve:{'008':'SS','011':'SS','11500':'SS','JT100':'SS','EP100':'SS','GD006':'SS','N15':'SS','N21':'SS','M93':'SS','M94':'SS','M68':'SS','009':'LS','012':'LS','02074':'LS','SX750':'LS','GD076':'LS','GD011':'LS'},
+  refOff:'Wag code swap', refAdd:'Wag swap', loc:'HOME'
+};
+
+/* ============================ state ============================ */
+let SET=loadSettings(), DEC=lsGet(LS.dec,{}), RAW='', SRC={kind:'',ts:'',note:''};
+let DATA={so:[],po:[],stk:[]}, M={};     // M = model built from DATA
+let actFilter='all';
+
+function lsGet(k,d){try{const v=localStorage.getItem(k);return v?JSON.parse(v):d}catch(e){return d}}
+function lsSet(k,v){try{localStorage.setItem(k,JSON.stringify(v))}catch(e){}}
+function loadSettings(){const s=lsGet(LS.set,{});return Object.assign({},JSON.parse(JSON.stringify(DEFAULTS)),s)}
+function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
+function soNo(d){return String(d||'').replace(/^0+/,'')}
+function ukDate(iso){if(!iso)return '';const p=iso.split('-');return p.length===3?p[2]+'/'+p[1]+'/'+p[0]:iso}
+function todayISO(){const d=new Date();return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0')}
+function n(v){const x=parseFloat(v);return isNaN(x)?0:x}
+function sageRef(){for(const f of arguments){const s=(f==null?'':String(f)).replace(/\s+/g,' ').trim();if(s&&s.length<=SAGE_REF_MAX)return s}const l=String(arguments[arguments.length-1]||'').trim();return l.slice(0,SAGE_REF_MAX)}
+
+/* ============================ code parsing ============================ */
+// WAGTS + style + size + colour, e.g. WAGTS012XXS03, WAGTSSX750SS153, WAGTS0113XL689
+const CODE_RE=/^WAGTS(.+?)(XXS|XXL|3XL|XS|SS|MM|LL|XL|XX)(\d{2,3})$/;
+function parseCode(code,desc){
+  const m=CODE_RE.exec(code||'');
+  if(!m)return null;
+  const style=m[1], size=SIZE_CODE[m[2]]||m[2], col=m[3];
+  let sleeve='';
+  if(/\bL\/S\b|LONG SLEEVE/i.test(desc||''))sleeve='LS';else if(/\bS\/S\b|SHORT SLEEVE/i.test(desc||''))sleeve='SS';
+  if(!sleeve)sleeve=SET.sleeve[style]||'?';
+  const colour=SET.colours[col]||('Colour '+col);
+  return {style,size,col,sleeve,colour,fam:colour+' '+(sleeve==='LS'?'long sleeve':sleeve==='SS'?'short sleeve':'sleeve ?'),famKey:colour+'|'+sleeve};
+}
+
+/* ============================ parsing the feed ============================ */
+function parseRaw(raw){
+  const out={so:[],po:[],stk:[]};
+  (raw||'').split(/\r?\n/).forEach(line=>{
+    if(!line.trim())return;const c=line.split('\t');if(c.length<14)return;
+    const t=c[0].trim(), code=(c[3]||'').trim();
+    if(!code.startsWith('WAGTS'))return;
+    const r={key:c[2],code,desc:c[4],doc:c[5],seq:n(c[6]),acct:c[7],cust:c[8],ref:c[9],date:c[10],q1:n(c[11]),q2:n(c[12]),q3:n(c[13]),q4:n(c[14]),status:c[27]||'',ordered:c[28]||'',co:c[1]};
+    if(t==='SO')out.so.push(r);else if(t==='PO')out.po.push(r);else if(t==='STK'){r.manu=c[19];r.held=c[20];out.stk.push(r)}
+  });
+  return out;
+}
+
+/* ============================ the model ============================ */
+function build(){
+  const stk={};
+  DATA.stk.forEach(s=>{if(s.co&&s.co!=='TIBARD')return;
+    const p=parseCode(s.code,s.desc);
+    stk[s.code]={code:s.code,desc:s.desc,inStock:s.q1,alloc:s.q2,sageFree:s.q3,onPO:s.q4,p,active:SET.active.includes(s.code),avail:0,poLines:[],demand:0}});
+  // codes on orders or POs with no stock row
+  DATA.so.concat(DATA.po).forEach(r=>{if(!stk[r.code]){stk[r.code]={code:r.code,desc:r.desc,inStock:0,alloc:0,sageFree:0,onPO:0,p:parseCode(r.code,r.desc),active:SET.active.includes(r.code),avail:0,poLines:[],demand:0,noRec:true}}});
+  DATA.po.forEach(r=>{stk[r.code].poLines.push(r)});
+  Object.values(stk).forEach(s=>{s.poOut=s.poLines.reduce((a,r)=>a+r.q3,0);s.poFirst=s.poLines.map(r=>r.date).filter(Boolean).sort()[0]||'';
+    // Available to share out = physical stock. Sage's allocation on these lines is rarely set, so the dashboard shares it itself.
+    s.avail=s.inStock});
+  // SO lines still outstanding, oldest promised first
+  const lines=DATA.so.filter(r=>r.q3>0).map(r=>{const s=stk[r.code];const d=DEC[r.key];return {r,s,p:s.p,need:r.q3,own:0,picks:[],short:0,dec:d&&!d.cleared?d:null,late:r.date&&r.date<todayISO()}});
+  lines.sort((a,b)=>(a.r.date||'9')<(b.r.date||'9')?-1:(a.r.date||'9')>(b.r.date||'9')?1:(a.r.doc<b.r.doc?-1:a.r.doc>b.r.doc?1:a.r.seq-b.r.seq));
+  // 1. own code first
+  lines.forEach(l=>{const s=l.s;s.demand+=l.need;l.own=Math.min(l.need,Math.max(0,s.avail));s.avail-=l.own;l.short=l.need-l.own});
+  // 2. decided lines take their picks before suggestions are made
+  const take=(code,q)=>{const s=stk[code];if(!s)return 0;const t=Math.min(q,Math.max(0,s.avail));s.avail-=t;return t};
+  lines.forEach(l=>{if(l.dec&&l.dec.picks&&!l.dec.imported&&l.dec.type!=='leave'){l.picks=l.dec.picks.map(pk=>({code:pk.code,qty:pk.qty,taken:take(pk.code,pk.qty),decided:true}));l.short=Math.max(0,l.need-l.own-l.picks.reduce((a,p)=>a+p.qty,0))}});
+  // 3. suggestions for the rest
+  const byFam={};Object.values(stk).forEach(s=>{if(!s.p)return;(byFam[s.p.famKey]=byFam[s.p.famKey]||[]).push(s)});
+  lines.forEach(l=>{if(l.short<=0||l.dec||!l.p)return;
+    const fam=byFam[l.p.famKey]||[];const si=SIZES.indexOf(l.p.size);
+    const rank=s=>{const d=Math.abs(SIZES.indexOf(s.p.size)-si);return d*10+(s.active?0:1)};
+    const cands=fam.filter(s=>s.code!==l.s.code&&s.avail>0&&Math.abs(SIZES.indexOf(s.p.size)-si)<=1)
+      .sort((a,b)=>rank(a)-rank(b)||b.avail-a.avail);
+    for(const s of cands){if(l.short<=0)break;const t=take(s.code,l.short);if(t>0){l.picks.push({code:s.code,qty:t,taken:t,sizeDiff:SIZES.indexOf(s.p.size)-si});l.short-=t}}
+    l.cands=cands.map(s=>s.code);
+  });
+  lines.forEach(l=>{l.short=Math.max(0,l.short);l.kind=l.short<=0&&l.picks.length===0?'ok':l.picks.length&&l.picks.every(p=>!p.sizeDiff)?'alt':l.picks.length?'size':'none';
+    if(l.need>l.own&&l.short>0&&l.picks.length)l.kind='part';l.oldCode=!l.s.active});
+  M={stk,lines,byFam,short:lines.filter(l=>l.need>l.own)};
+}
+
+/* ============================ rendering ============================ */
+function showTab(t){document.querySelectorAll('nav.tabs button').forEach(b=>b.classList.toggle('on',b.dataset.t===t));document.querySelectorAll('.view').forEach(v=>v.classList.toggle('on',v.id==='v-'+t));if(t==='data')renderData()}
+document.getElementById('tabs').addEventListener('click',e=>{const b=e.target.closest('button');if(b)showTab(b.dataset.t)});
+document.getElementById('actFilters').addEventListener('click',e=>{const c=e.target.closest('.chip');if(!c)return;actFilter=c.dataset.f;document.querySelectorAll('#actFilters .chip').forEach(x=>x.classList.toggle('on',x===c));renderAction()});
+
+function stockCell(s){if(!s)return '<span class="badge">no record</span>';
+  const bits=[];bits.push('<b>'+s.inStock+'</b> in stock');if(s.demand)bits.push(s.demand+' needed');if(s.poOut)bits.push(s.poOut+' on PO'+(s.poFirst?' due '+ukDate(s.poFirst):''));return bits.join(' · ')}
+function codeCell(s,code){code=code||s.code;const st=M.stk[code]||{};return '<span class="code">'+esc(code)+'</span>'+(st.active===false?' <span class="badge amber">old code</span>':'')+(st.noRec?' <span class="badge red">not in stock file</span>':'')+'<div class="desc">'+esc(st.desc||'')+'</div>'}
+
+function render(){
+  const sh=M.short, dec=Object.values(DEC).filter(d=>!d.cleared);
+  const nSw=dec.filter(d=>d.type==='switch'&&!d.done).length, nTr=dec.filter(d=>d.type==='transfer'&&!d.imported).length;
+  document.getElementById('n-action').textContent=sh.length;document.getElementById('n-action').className='n'+(sh.length?' hot':'');
+  document.getElementById('n-switch').textContent=nSw;document.getElementById('n-transfer').textContent=nTr;document.getElementById('n-all').textContent=M.lines.length;
+  const alt=sh.filter(l=>l.kind==='alt').length,size=sh.filter(l=>l.kind==='size').length,none=sh.filter(l=>l.kind==='none'||l.kind==='part').length,old=sh.filter(l=>l.oldCode).length,late=sh.filter(l=>l.late).length;
+  document.getElementById('tiles').innerHTML=
+    tile('Short lines',sh.length,sh.length?'red':'green','of '+M.lines.length+' open Wagamama lines','all')+
+    tile('Ordered on an old code',old,old?'amber':'green','short lines on codes not on IT\'s list','old')+
+    tile('Same size elsewhere',alt,alt?'green':'','another code has the stock','alt')+
+    tile('Size up / down only',size,size?'amber':'','XXS for XS, S for XS…','size')+
+    tile('Nothing in stock',none,none?'red':'green','needs PO or wait','none')+
+    tile('Late',late,late?'red':'green','promised date passed','late');
+  renderAction();renderGrid();renderSwitch();renderTransfer();renderAll();
+  const st=document.getElementById('hdrStatus');st.innerHTML=SRC.ts?('Sage data '+esc(SRC.kind)+' · '+esc(fmtTs(SRC.ts))):'No data';
+  document.getElementById('refOff').textContent=SET.refOff;document.getElementById('refAdd').textContent=SET.refAdd;
+}
+function tile(l,v,cls,s,f){return '<div class="tile" onclick="setActFilter(\''+f+'\')"><div class="l">'+l+'</div><div class="v '+cls+'">'+v+'</div><div class="s">'+s+'</div></div>'}
+function setActFilter(f){actFilter=f;document.querySelectorAll('#actFilters .chip').forEach(x=>x.classList.toggle('on',x.dataset.f===f));showTab('action');renderAction()}
+function fmtTs(ts){const d=new Date(ts);return isNaN(d)?ts:d.toLocaleString('en-GB',{day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'})}
+
+function renderAction(){
+  let rows=M.short.filter(l=>actFilter==='all'||(actFilter==='old'&&l.oldCode)||(actFilter==='alt'&&l.kind==='alt')||(actFilter==='size'&&l.kind==='size')||(actFilter==='none'&&(l.kind==='none'||l.kind==='part'))||(actFilter==='late'&&l.late));
+  const tb=document.querySelector('#actTable tbody');
+  if(!rows.length){tb.innerHTML='<tr><td colspan="6" class="empty">'+(M.lines.length?'Nothing short here.':'No data loaded yet.')+'</td></tr>';return}
+  let h='',lastDoc='';
+  rows.forEach(l=>{const r=l.r;
+    if(r.doc!==lastDoc){lastDoc=r.doc;h+='<tr class="ohead"><td colspan="6"><b>SO '+esc(soNo(r.doc))+'</b> &nbsp; '+esc(r.cust)+' &nbsp; <span class="desc" style="display:inline">ref '+esc(r.ref)+' · ordered '+ukDate(r.ordered)+' · promised <span class="'+(l.late?'late':'')+'">'+ukDate(r.date)+'</span>'+(r.status==='1'?' <span class="badge amber">On hold</span>':'')+'</span></td></tr>'}
+    h+='<tr'+(l.dec?' class="decided"':'')+'><td>line '+r.seq+(l.late?' <span class="badge red">late</span>':'')+'</td><td>'+codeCell(l.s)+'</td><td class="num"><b>'+l.need+'</b>'+(l.own?'<div class="desc">'+l.own+' from own stock</div>':'')+'</td><td style="font-size:12px">'+stockCell(l.s)+'</td><td>'+coverCell(l)+'</td><td class="acts edit-only">'+actionBtns(l)+'</td></tr>';
+  });
+  tb.innerHTML=h;
+}
+function coverCell(l){
+  let h='';
+  if(l.dec){const d=l.dec;h+='<span class="badge '+(d.type==='switch'?'gold':d.type==='transfer'?'green':'')+'">'+(d.type==='switch'?'Switch in Sage':d.type==='transfer'?'Stock transfer':'Leave as is')+(d.done?' · done':d.imported?' · imported':'')+'</span> ';
+    (d.picks||[]).forEach(p=>{h+='<span class="pick alt"><span class="code">'+esc(p.code)+'</span> × '+p.qty+'</span>'});if(d.note)h+='<div class="desc">'+esc(d.note)+'</div>';return h}
+  l.picks.forEach(p=>{const s=M.stk[p.code];h+='<span class="pick alt" title="'+esc(s?s.desc:'')+'"><span class="code">'+esc(p.code)+'</span> × '+p.qty+(p.sizeDiff?' <span class="badge amber">'+(p.sizeDiff>0?'size up':'size down')+' ('+(s&&s.p?s.p.size:'')+')</span>':' <span class="badge green">same size</span>')+(s&&!s.active?' <span class="badge amber">old</span>':'')+'</span>'});
+  if(l.short>0){const s=l.s;h+='<span class="pick none">'+l.short+' not in stock'+(s.poOut?' · '+s.poOut+' on PO'+(s.poFirst?' due '+ukDate(s.poFirst):''):'')+'</span>'}
+  return h;
+}
+function actionBtns(l){if(l.dec)return '<button class="btn btn-o btn-sm" onclick="undoDecision(\''+esc(l.r.key)+'\')">Undo</button>';
+  const can=l.picks.length>0;
+  return (can?'<button class="btn btn-p btn-sm" onclick="decide(\''+esc(l.r.key)+'\',\'switch\')" title="Amend the order line in Sage to the suggested code">Switch in Sage</button><button class="btn btn-g btn-sm" onclick="decide(\''+esc(l.r.key)+'\',\'transfer\')" title="Move the garments onto the ordered code with a write-off and add-stock file">Transfer stock</button>':'')+
+    '<button class="btn btn-o btn-sm" onclick="decide(\''+esc(l.r.key)+'\',\'pick\')" title="Choose a different code or quantity">Choose…</button><button class="btn btn-o btn-sm" onclick="decide(\''+esc(l.r.key)+'\',\'leave\')">Leave</button>';
+}
+
+/* ---- decisions ---- */
+function lineByKey(k){return M.lines.find(l=>l.r.key===k)}
+function decide(key,type){const l=lineByKey(key);if(!l)return;let picks=l.picks.map(p=>({code:p.code,qty:p.qty}));
+  if(type==='pick'){
+    const fam=(M.byFam[l.p?l.p.famKey:'']||[]).filter(s=>s.code!==l.s.code).sort((a,b)=>b.avail-a.avail);
+    const list=fam.map((s,i)=>(i+1)+') '+s.code+' size '+s.p.size+' – '+s.avail+' free'+(s.active?'':' (old)')).join('\n');
+    const a=prompt('Which code covers SO '+soNo(l.r.doc)+' line '+l.r.seq+' ('+l.need+' × '+l.s.code+')?\nType the number, or a code:\n\n'+list);if(a==null)return;
+    const pickS=/^\d+$/.test(a.trim())?fam[parseInt(a,10)-1]:M.stk[a.trim().toUpperCase()];if(!pickS){alert('Code not recognised.');return}
+    const q=prompt('Quantity from '+pickS.code+' (free '+pickS.avail+')',Math.min(l.need-l.own,Math.max(pickS.avail,0))||l.need);if(q==null)return;
+    picks=[{code:pickS.code,qty:Math.max(1,Math.round(n(q)))}];
+    type=confirm('OK = Switch in Sage (amend the order to '+pickS.code+').\nCancel = Transfer stock (write off '+pickS.code+', add stock to '+l.s.code+').')?'switch':'transfer';
+  }
+  if(type==='leave')picks=[];
+  DEC[key]={type,picks,when:new Date().toISOString(),doc:l.r.doc,seq:l.r.seq,cust:l.r.cust,from:l.s.code,need:l.need};
+  saveDecisions();rebuild();
+}
+function undoDecision(key){DEC[key]={cleared:true,when:new Date().toISOString()};saveDecisions();rebuild()}
+function saveDecisions(){lsSet(LS.dec,DEC);document.getElementById('pubBtn').textContent='📤 Publish decisions *'}
+function rebuild(){build();render()}
+
+function renderSwitch(){const rows=Object.entries(DEC).filter(([k,d])=>d.type==='switch'&&!d.cleared).sort((a,b)=>a[1].doc<b[1].doc?-1:1);
+  document.getElementById('swCount').textContent=rows.filter(([k,d])=>!d.done).length+' to do';
+  const tb=document.querySelector('#swTable tbody');if(!rows.length){tb.innerHTML='<tr><td colspan="8" class="empty">No switches decided yet.</td></tr>';return}
+  tb.innerHTML=rows.map(([k,d])=>'<tr class="'+(d.done?'done':'')+'"><td><b>'+esc(soNo(d.doc))+'</b></td><td>'+esc(d.cust)+'</td><td>'+d.seq+'</td><td><span class="code">'+esc(d.from)+'</span></td><td>'+(d.picks||[]).map(p=>'<span class="code">'+esc(p.code)+'</span>').join('<br>')+'</td><td class="num">'+(d.picks||[]).map(p=>p.qty).join('<br>')+'</td><td class="desc">'+fmtTs(d.when)+(d.done?'<br>done '+fmtTs(d.done):'')+'</td><td class="acts edit-only">'+(d.done?'':'<button class="btn btn-g btn-sm" onclick="markDone(\''+esc(k)+'\')">✓ Changed in Sage</button>')+'<button class="btn btn-o btn-sm" onclick="undoDecision(\''+esc(k)+'\')">Undo</button></td></tr>').join('');
+}
+function markDone(k){if(DEC[k]){DEC[k].done=new Date().toISOString();saveDecisions();rebuild()}}
+function copySwitchList(){const rows=Object.values(DEC).filter(d=>d.type==='switch'&&!d.cleared&&!d.done);const t=rows.map(d=>'SO '+soNo(d.doc)+' line '+d.seq+': '+d.from+' -> '+(d.picks||[]).map(p=>p.code+' x'+p.qty).join(', ')).join('\n');navigator.clipboard&&navigator.clipboard.writeText(t).then(()=>alert('Copied '+rows.length+' lines.'),()=>prompt('Copy:',t))}
+
+function renderTransfer(){const all=Object.entries(DEC).filter(([k,d])=>d.type==='transfer'&&!d.cleared);
+  const todo=all.filter(([k,d])=>!d.imported), hist=all.filter(([k,d])=>d.imported).sort((a,b)=>a[1].imported<b[1].imported?1:-1);
+  document.getElementById('trCount').textContent=todo.length+' line'+(todo.length===1?'':'s');document.getElementById('trHistCount').textContent=hist.length+' line'+(hist.length===1?'':'s');
+  const tb=document.querySelector('#trTable tbody');
+  tb.innerHTML=todo.length?todo.map(([k,d])=>'<tr><td><b>'+esc(soNo(d.doc))+'</b> line '+d.seq+'</td><td>'+esc(d.cust)+'</td><td>'+(d.picks||[]).map(p=>'<span class="code">'+esc(p.code)+'</span>').join('<br>')+'</td><td><span class="code">'+esc(d.from)+'</span></td><td class="num">'+(d.picks||[]).map(p=>p.qty).join('<br>')+'</td><td class="desc">'+fmtTs(d.when)+'</td><td class="acts edit-only"><button class="btn btn-o btn-sm" onclick="undoDecision(\''+esc(k)+'\')">Undo</button></td></tr>').join(''):'<tr><td colspan="7" class="empty">Nothing waiting to import.</td></tr>';
+  document.querySelector('#trHist tbody').innerHTML=hist.length?hist.map(([k,d])=>'<tr><td class="desc">'+fmtTs(d.imported)+'</td><td>'+esc(soNo(d.doc))+'</td><td>'+(d.picks||[]).map(p=>'<span class="code">'+esc(p.code)+'</span>').join('<br>')+'</td><td><span class="code">'+esc(d.from)+'</span></td><td class="num">'+(d.picks||[]).map(p=>p.qty).join('<br>')+'</td></tr>').join(''):'<tr><td colspan="5" class="empty">No batches imported yet.</td></tr>';
+}
+function transferRows(){return Object.values(DEC).filter(d=>d.type==='transfer'&&!d.cleared&&!d.imported)}
+function csv(rows){return rows.map(r=>r.map(v=>{v=String(v==null?'':v);return /[",\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v}).join(',')).join('\r\n')+'\r\n'}
+function dl(name,text){const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([text],{type:'text/csv'}));a.download=name;document.body.appendChild(a);a.click();setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove()},500)}
+function exportTransfers(which){const todo=transferRows();if(!todo.length){alert('Nothing waiting to import.');return}
+  const date=ukDate(todayISO()), stamp=todayISO();let rows;
+  if(which==='off'){rows=[['StockCode','Location','Bin','Qty','Reference1','Reference2','ActivityDate','WriteOffCat']];
+    todo.forEach(d=>(d.picks||[]).forEach(p=>rows.push([p.code,SET.loc,'',Math.round(p.qty),sageRef(SET.refOff),sageRef(soNo(d.doc)),date,'Manual Reduction'])));
+    dl('Wagamama_WriteOff_'+stamp+'.csv',csv(rows))}
+  else{rows=[['StockCode','Location','Bin','Qty','StockExported','Reference1']];
+    todo.forEach(d=>{const q=(d.picks||[]).reduce((a,p)=>a+Math.round(p.qty),0);rows.push([d.from,SET.loc,'',q,'',sageRef(SET.refAdd+' '+soNo(d.doc),soNo(d.doc))])});
+    dl('Wagamama_AddStock_'+stamp+'.csv',csv(rows))}
+}
+function markImported(){const todo=Object.entries(DEC).filter(([k,d])=>d.type==='transfer'&&!d.cleared&&!d.imported);if(!todo.length)return;
+  if(!confirm('Mark '+todo.length+' transfer line'+(todo.length===1?'':'s')+' as imported into Sage? Export both files first.'))return;
+  const t=new Date().toISOString();todo.forEach(([k,d])=>d.imported=t);saveDecisions();rebuild();showTab('transfer')}
+
+/* ---- stock grid ---- */
+function renderGrid(){const fams=Object.keys(M.byFam||{}).sort();const w=document.getElementById('gridWrap');
+  if(!fams.length){w.innerHTML='<div class="empty">No stock rows loaded.</div>';return}
+  let h='<table class="grid"><thead><tr><th class="fam">Colour / sleeve</th>'+SIZES.map(s=>'<th>'+s+'</th>').join('')+'</tr></thead><tbody>';
+  fams.forEach(fk=>{const list=M.byFam[fk];const name=list[0].p.fam;
+    h+='<tr><th class="fam">'+esc(name)+'</th>';
+    SIZES.forEach(sz=>{const cs=list.filter(s=>s.p.size===sz).sort((a,b)=>(b.active-a.active)||b.avail-a.avail);
+      h+='<td class="cell">'+cs.map(s=>{const cls=s.avail>0?'ok':s.poOut>0?'po':s.inStock<s.demand?'neg':'zero';
+        return '<span class="cc '+cls+(s.active?'':' old')+'" title="'+esc(s.desc)+'"><span class="code">'+esc(s.code.replace(/^WAGTS/,''))+'</span>'+(s.active?'':'<span class="tag">old · </span>')+'<b>'+s.avail+'</b> free'+(s.demand?' · '+s.demand+' needed':'')+(s.poOut?' · '+s.poOut+' PO':'')+'</span>'}).join('')+'</td>'});
+    h+='</tr><tr class="famrow"><td class="desc" style="text-align:right;padding-right:10px">Short after suggestions</td>';
+    SIZES.forEach(sz=>{const sh=M.lines.filter(l=>l.p&&l.p.famKey===fk&&l.p.size===sz&&l.short>0).reduce((a,l)=>a+l.short,0);h+='<td class="need">'+(sh?sh:'')+'</td>'});
+    h+='</tr>'});
+  w.innerHTML=h+'</tbody></table>';
+}
+
+/* ---- all lines ---- */
+function renderAll(){const q=(document.getElementById('findIn').value||'').trim().toLowerCase();
+  const rows=M.lines.filter(l=>!q||soNo(l.r.doc).includes(q)||(l.r.cust||'').toLowerCase().includes(q)||l.r.code.toLowerCase().includes(q)||(l.p&&l.p.size.toLowerCase()===q));
+  document.querySelector('#allTable tbody').innerHTML=rows.length?rows.map(l=>'<tr><td><b>'+esc(soNo(l.r.doc))+'</b><div class="desc">line '+l.r.seq+(l.r.status==='1'?' · on hold':'')+'</div></td><td>'+esc(l.r.cust)+'<div class="desc">'+esc(l.r.ref)+'</div></td><td class="'+(l.late?'late':'')+'">'+ukDate(l.r.date)+'</td><td>'+codeCell(l.s)+'</td><td class="num">'+l.r.q1+'</td><td class="num">'+l.need+'</td><td>'+(l.need<=l.own?'<span class="badge green">in stock</span>':coverCell(l))+'</td></tr>').join(''):'<tr><td colspan="7" class="empty">No lines match.</td></tr>';
+}
+
+/* ---- data tab ---- */
+function renderData(){
+  document.getElementById('srcInfo').innerHTML='<div style="font-size:13px;line-height:1.7">'+
+    '<b>Now showing:</b> '+(SRC.kind?esc(SRC.kind)+' from '+esc(fmtTs(SRC.ts)):'nothing loaded')+(SRC.note?'<div class="desc">'+esc(SRC.note)+'</div>':'')+
+    '<div class="desc" style="margin-top:6px">Published Wagamama paste = wagamama_live.sql pasted and published from the editor PC (preferred). Order tracker feed = the daily ordertracker_live.sql paste in SOPtracker/data.json, used when it is newer or nothing has been published (every WAGTS stock item only from tracker SQL v2.9). '+
+    'Lines: '+M.lines.length+' open · stock codes: '+Object.keys(M.stk).length+' · PO lines: '+DATA.po.length+'.</div></div>';
+  document.getElementById('setActive').value=SET.active.join('\n');
+  document.getElementById('setColours').value=Object.entries(SET.colours).map(([k,v])=>k+' = '+v).join('\n');
+  document.getElementById('setSleeve').value=Object.entries(SET.sleeve).map(([k,v])=>k+' = '+v).join('\n');
+  document.getElementById('setRefOff').value=SET.refOff;document.getElementById('setRefAdd').value=SET.refAdd;document.getElementById('setLoc').value=SET.loc;
+  document.getElementById('setToken').value='';document.getElementById('setToken').placeholder=pubToken()?'(kept on this PC)':'paste a GitHub token';
+}
+function kv(text){const o={};text.split(/\r?\n/).forEach(l=>{const m=/^\s*([^=]+?)\s*=\s*(.+?)\s*$/.exec(l);if(m)o[m[1]]=m[2]});return o}
+function saveSettings(){SET.active=document.getElementById('setActive').value.split(/\r?\n/).map(s=>s.trim().toUpperCase()).filter(Boolean);
+  SET.colours=kv(document.getElementById('setColours').value);SET.sleeve=kv(document.getElementById('setSleeve').value.toUpperCase());
+  SET.refOff=document.getElementById('setRefOff').value.trim()||DEFAULTS.refOff;SET.refAdd=document.getElementById('setRefAdd').value.trim()||DEFAULTS.refAdd;SET.loc=document.getElementById('setLoc').value.trim()||DEFAULTS.loc;
+  lsSet(LS.set,SET);rebuild();renderData();alert('Settings saved on this PC.')}
+function resetSettings(){if(!confirm('Back to the built-in settings?'))return;try{localStorage.removeItem(LS.set)}catch(e){}SET=loadSettings();rebuild();renderData()}
+function applyPaste(){const raw=document.getElementById('pasteBox').value;const d=parseRaw(raw);if(!d.so.length&&!d.stk.length){alert('No WAGTS rows found in the paste. Copy columns A to AD from wagamama_live.sql.');return}
+  const ts=new Date().toISOString();try{localStorage.setItem(LS.raw,raw);localStorage.setItem(LS.ts,ts)}catch(e){alert('The paste is too big to keep on this PC; it is used for this session only.')}
+  useData(d,'your paste',ts,'Pasted on this PC. "Forget paste" goes back to the tracker feed.');document.getElementById('pasteBox').value=''}
+function clearPaste(){try{localStorage.removeItem(LS.raw);localStorage.removeItem(LS.ts)}catch(e){}fetchShared()}
+function useData(d,kind,ts,note){DATA=d;SRC={kind,ts,note};rebuild();renderData()}
+
+/* ---- publishing decisions ---- */
+function pubToken(){try{return localStorage.getItem(LS.tok)||localStorage.getItem(LS.sopTok)||''}catch(e){return ''}}
+function saveToken(){const t=document.getElementById('setToken').value.trim();if(!t)return;try{localStorage.setItem(LS.tok,t)}catch(e){}document.getElementById('pubMsg').textContent='Token kept on this PC.';renderData()}
+function publishDecisions(){const tok=pubToken();const body=JSON.stringify({app:'wagamama',ver:VER,decisions:DEC,savedAt:new Date().toISOString()},null,1);
+  const msg=document.getElementById('pubMsg');
+  if(!tok){dl('decisions.json',body);alert('No publishing token on this PC: decisions.json downloaded. Upload it to SOPtracker/wagamama/ in GitHub, or add a token under Data & settings.');return}
+  const headers={Authorization:'Bearer '+tok,Accept:'application/vnd.github+json'};
+  fetch(PUB_API+DEC_FILE+'?t='+Date.now(),{headers,cache:'no-store'}).then(r=>r.ok?r.json():{}).then(cur=>
+    fetch(PUB_API+DEC_FILE,{method:'PUT',headers,body:JSON.stringify({message:'Wagamama decisions published '+new Date().toISOString().slice(0,16).replace('T',' '),content:btoa(unescape(encodeURIComponent(body))),sha:cur.sha})}))
+  .then(r=>{if(!r.ok)throw new Error('GitHub said '+r.status);document.getElementById('pubBtn').textContent='📤 Publish decisions';if(msg)msg.textContent='Published '+fmtTs(new Date().toISOString())+'. Other PCs see it within a minute.';alert('Decisions published for the team.')})
+  .catch(e=>{alert('Publish failed: '+e.message+'. Check the token has Contents read/write on SOPtracker.')});
+}
+function publishData(){let raw='',ts='';try{raw=localStorage.getItem(LS.raw)||'';ts=localStorage.getItem(LS.ts)||''}catch(e){}
+  if(!raw){alert('Nothing pasted on this PC yet. Paste today\'s data first (Data tab).');return}
+  const body=JSON.stringify({app:'wagamama',ver:VER,raw,ts,savedAt:new Date().toISOString()});const tok=pubToken();
+  if(!tok){dl('data.json',body);alert('No publishing token on this PC: data.json downloaded. Upload it to SOPtracker/wagamama/ in GitHub, or add a token under Data & settings.');return}
+  const headers={Authorization:'Bearer '+tok,Accept:'application/vnd.github+json'};const b=document.getElementById('pubDataBtn');b.disabled=true;
+  fetch(PUB_API+OWN_DATA+'?t='+Date.now(),{headers,cache:'no-store'}).then(r=>r.ok?r.json():{}).then(cur=>
+    fetch(PUB_API+OWN_DATA,{method:'PUT',headers,body:JSON.stringify({message:'Wagamama data published '+new Date().toISOString().slice(0,16).replace('T',' '),content:btoa(unescape(encodeURIComponent(body))),sha:cur.sha})}))
+  .then(r=>{if(!r.ok)throw new Error('GitHub said '+r.status);b.disabled=false;alert('Published for the team. View-only PCs see it within a minute.')})
+  .catch(e=>{b.disabled=false;alert('Publish failed: '+e.message+'. Check the token has Contents read/write on SOPtracker.')});
+}
+function clearDecisions(){if(!confirm('Clear every switch and transfer decision on this PC? (Published decisions are reloaded next time the page opens.)'))return;DEC={};saveDecisions();rebuild()}
+function mergeDecisions(remote){let changed=false;Object.entries(remote||{}).forEach(([k,d])=>{const l=DEC[k];if(!l||(d.when||'')>(l.when||'')||(d.done&&!l.done)||(d.imported&&!l.imported)){DEC[k]=d;changed=true}});if(changed)lsSet(LS.dec,DEC)}
+
+/* ---- loading ---- */
+function fetchShared(){
+  const get=u=>fetch(u+'?t='+Date.now(),{cache:'no-store'}).then(r=>r.ok?r.json():null).catch(()=>null);
+  Promise.all([get(DEC_FILE),get(OWN_DATA),get(SOP_DATA)]).then(([dec,own,sop])=>{
+    if(dec&&dec.decisions)mergeDecisions(dec.decisions);
+    let localRaw='',localTs='';try{localRaw=localStorage.getItem(LS.raw)||'';localTs=localStorage.getItem(LS.ts)||''}catch(e){}
+    if(IS_EDITOR&&localRaw){useData(parseRaw(localRaw),'your paste',localTs,'Pasted on this PC. "Forget paste" goes back to the tracker feed.');return}
+    const cands=[];if(own&&own.raw)cands.push({d:parseRaw(own.raw),kind:'published Wagamama paste',ts:own.ts||own.savedAt||''});if(sop&&sop.raw)cands.push({d:parseRaw(sop.raw),kind:'Order tracker feed',ts:sop.ts||sop.savedAt||''});
+    cands.sort((a,b)=>(b.ts||'')<(a.ts||'')?-1:1);
+    if(cands.length)useData(cands[0].d,cands[0].kind,cands[0].ts,'');else{SRC={kind:'',ts:'',note:'Could not read ../data.json. Open the page from GitHub Pages, or paste data in editor mode (?edit).'};rebuild();renderData()}
+  });
+}
+(function init(){
+  if(IS_EDITOR){document.body.classList.add('editor');document.getElementById('modeBadge').textContent='Editor'}else document.getElementById('modeBadge').textContent='View only';
+  rebuild();fetchShared();
+})();
+</script>
+</body>
+</html>
