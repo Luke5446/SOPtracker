@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Wagamama code switch</title>
+<!-- Changelog: 2026-11-20 v1.4 - Transfer stock and its write-off / add-stock exports are editor-only again; transfer records survive new pastes and are saved into data.json (transfers) on Publish. View-only keeps Switch in Sage per browser. -->
 <!-- Changelog: 2026-11-20 v1.3 - one Publish button (data only). Decide buttons, Switch list and the write-off / add-stock exports work on the view-only screen; decisions live in that browser and are cleared when the next publish arrives. decisions.json dropped. -->
 <!-- Changelog: 2026-11-19 v1.2 - fix: the Paste, Settings and Publishing cards on the Data tab stayed hidden in editor mode (inline display:none beat the editor CSS). -->
 <!-- Changelog: 2026-11-19 v1.1 - Publish for team: the editor's daily paste of wagamama_live.sql goes to wagamama/data.json, which view-only PCs read first. -->
@@ -144,7 +145,7 @@ input.find{border:1px solid var(--line);border-radius:6px;padding:8px 11px;font-
   <div class="note">A line is <b>short</b> when the stock on the code ordered, shared out to the oldest promised date first, does not cover it.
     The suggestion is the code in the same colour and sleeve length with the most free stock: same size first, then a size up or down.
     <b>Switch in Sage</b> = amend the order line to the other code (goes on the Switch list). <b>Transfer stock</b> = move the garments onto the ordered code instead,
-    with a Sage write-off and add-stock file (goes on the Stock transfer files tab). Decisions are kept in this browser only and are cleared when the next day's data is published. Codes not on IT's current list are flagged <span class="badge amber">old code</span>.</div>
+    with a Sage write-off and add-stock file (goes on the Stock transfer files tab). Switch decisions are kept in this browser only and are cleared when the next day's data is published. Transfer stock is done from the editor and its record is saved in the repo on Publish. Codes not on IT's current list are flagged <span class="badge amber">old code</span>.</div>
   <div class="card"><div class="tw"><table id="actTable"><thead><tr>
     <th>Order / line</th><th>Code ordered</th><th class="num">Need</th><th>Stock on code</th><th>Suggested cover</th><th class="acts">Decide</th></tr></thead><tbody></tbody></table></div></div>
 </section>
@@ -167,11 +168,11 @@ input.find{border:1px solid var(--line);border-radius:6px;padding:8px 11px;font-
 <section class="view" id="v-transfer">
   <div class="note">Garments moved from an alternative code onto the code the customer ordered, so the order picks and despatches as it stands. Two Sage import files per batch:
     <b>Write-off</b> (TIB write-off layout, Manual Reduction, Reference1 <code id="refOff"></code>, Reference2 = order number) and <b>Add stock</b> (TIB_Add_Stock layout, Reference1 <code id="refAdd"></code> + order number, max 20 characters).
-    Export both, import them in Sage, then press <b>Mark imported</b>. Allocation on the order follows in Sage. Export the files the same day you decide: the list is cleared when the next day's data is published.</div>
+    Export both, import them in Sage, then press <b>Mark imported</b>. Allocation on the order follows in Sage. Transfers are decided and exported from the editor only; the record (waiting and imported) is kept across pastes and saved in the repo with each Publish.</div>
   <div class="card"><h2>Waiting to import <span class="r" id="trCount"></span>
-    <button class="btn btn-p btn-sm" onclick="exportTransfers('off')">&#8681; Write-off file</button>
-    <button class="btn btn-p btn-sm" onclick="exportTransfers('add')">&#8681; Add-stock file</button>
-    <button class="btn btn-g btn-sm" onclick="markImported()">&#10003; Mark imported</button></h2>
+    <button class="btn btn-p btn-sm edit-only" onclick="exportTransfers('off')">&#8681; Write-off file</button>
+    <button class="btn btn-p btn-sm edit-only" onclick="exportTransfers('add')">&#8681; Add-stock file</button>
+    <button class="btn btn-g btn-sm edit-only" onclick="markImported()">&#10003; Mark imported</button></h2>
     <div class="tw"><table id="trTable"><thead><tr><th>Order</th><th>Customer</th><th>Write off (from)</th><th>Add stock (to)</th><th class="num">Qty</th><th>Decided</th><th class="acts"></th></tr></thead><tbody></tbody></table></div></div>
   <div class="card"><h2>Imported batches <span class="r" id="trHistCount"></span></h2><div class="tw"><table id="trHist"><thead><tr><th>Imported</th><th>Order</th><th>From</th><th>To</th><th class="num">Qty</th></tr></thead><tbody></tbody></table></div></div>
 </section>
@@ -203,7 +204,7 @@ input.find{border:1px solid var(--line);border-radius:6px;padding:8px 11px;font-
   </div></div>
 
   <div class="card edit-only"><h2>Publishing</h2><div class="pad">
-    <div class="note"><b>Publish for team</b> (header) puts your paste into <code>wagamama/data.json</code> in the SOPtracker repo so every PC in the office reads it. The Order tracker's publishing token on this PC is used; if there is none, paste one below (Contents: read and write on SOPtracker). Decisions are never published: each PC keeps its own and they reset on the next publish.</div>
+    <div class="note"><b>Publish for team</b> (header) puts your paste into <code>wagamama/data.json</code> in the SOPtracker repo so every PC in the office reads it. The Order tracker's publishing token on this PC is used; if there is none, paste one below (Contents: read and write on SOPtracker). Switch decisions stay on each PC and reset on the next publish. Transfer records from this editor PC are included in the publish, so the repo holds the stock-move history.</div>
     <div class="field"><label>GitHub token for this PC</label><input id="setToken" type="password" placeholder="(kept)"></div>
     <div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn btn-p" onclick="saveToken()">Save token</button><button class="btn btn-r" onclick="clearDecisions()">Clear all decisions on this PC</button></div>
     <div id="pubMsg" class="desc" style="margin-top:8px"></div>
@@ -222,7 +223,7 @@ input.find{border:1px solid var(--line);border-radius:6px;padding:8px 11px;font-
 
 <script>
 /* ============================ constants ============================ */
-const VER='1.3';
+const VER='1.4';
 const IS_EDITOR=/[?&]edit\b/.test(location.search);
 const SOP_DATA='../data.json';                 // Order tracker feed, same GitHub Pages origin
 const OWN_DATA='data.json';                    // optional published paste from wagamama_live.sql
@@ -370,7 +371,7 @@ function coverCell(l){
 }
 function actionBtns(l){if(l.dec)return '<button class="btn btn-o btn-sm" onclick="undoDecision(\''+esc(l.r.key)+'\')">Undo</button>';
   const can=l.picks.length>0;
-  return (can?'<button class="btn btn-p btn-sm" onclick="decide(\''+esc(l.r.key)+'\',\'switch\')" title="Amend the order line in Sage to the suggested code">Switch in Sage</button><button class="btn btn-g btn-sm" onclick="decide(\''+esc(l.r.key)+'\',\'transfer\')" title="Move the garments onto the ordered code with a write-off and add-stock file">Transfer stock</button>':'')+
+  return (can?'<button class="btn btn-p btn-sm" onclick="decide(\''+esc(l.r.key)+'\',\'switch\')" title="Amend the order line in Sage to the suggested code">Switch in Sage</button><button class="btn btn-g btn-sm edit-only" onclick="decide(\''+esc(l.r.key)+'\',\'transfer\')" title="Move the garments onto the ordered code with a write-off and add-stock file">Transfer stock</button>':'')+
     '<button class="btn btn-o btn-sm" onclick="decide(\''+esc(l.r.key)+'\',\'pick\')" title="Choose a different code or quantity">Choose…</button><button class="btn btn-o btn-sm" onclick="decide(\''+esc(l.r.key)+'\',\'leave\')">Leave</button>';
 }
 
@@ -384,7 +385,7 @@ function decide(key,type){const l=lineByKey(key);if(!l)return;let picks=l.picks.
     const pickS=/^\d+$/.test(a.trim())?fam[parseInt(a,10)-1]:M.stk[a.trim().toUpperCase()];if(!pickS){alert('Code not recognised.');return}
     const q=prompt('Quantity from '+pickS.code+' (free '+pickS.avail+')',Math.min(l.need-l.own,Math.max(pickS.avail,0))||l.need);if(q==null)return;
     picks=[{code:pickS.code,qty:Math.max(1,Math.round(n(q)))}];
-    type=confirm('OK = Switch in Sage (amend the order to '+pickS.code+').\nCancel = Transfer stock (write off '+pickS.code+', add stock to '+l.s.code+').')?'switch':'transfer';
+    type=IS_EDITOR&&!confirm('OK = Switch in Sage (amend the order to '+pickS.code+').\nCancel = Transfer stock (write off '+pickS.code+', add stock to '+l.s.code+').')?'transfer':'switch';
   }
   if(type==='leave')picks=[];
   DEC[key]={type,picks,when:new Date().toISOString(),doc:l.r.doc,seq:l.r.seq,cust:l.r.cust,from:l.s.code,need:l.need};
@@ -471,7 +472,7 @@ function clearPaste(){try{localStorage.removeItem(LS.raw);localStorage.removeIte
 function useData(d,kind,ts,note){DATA=d;SRC={kind,ts,note};
   // Decisions belong to one day's data: a newer publish clears them (Sage then shows the switched codes).
   let had='';try{had=localStorage.getItem(LS.decTs)||''}catch(e){}
-  if(ts&&had!==ts){if(had&&Object.keys(DEC).length){DEC={};lsSet(LS.dec,DEC)}try{localStorage.setItem(LS.decTs,ts)}catch(e){}}
+  if(ts&&had!==ts){if(had){Object.keys(DEC).forEach(k=>{if(DEC[k].type!=='transfer')delete DEC[k]});lsSet(LS.dec,DEC)}try{localStorage.setItem(LS.decTs,ts)}catch(e){}}
   rebuild();renderData()}
 
 /* ---- publishing decisions ---- */
@@ -479,7 +480,8 @@ function pubToken(){try{return localStorage.getItem(LS.tok)||localStorage.getIte
 function saveToken(){const t=document.getElementById('setToken').value.trim();if(!t)return;try{localStorage.setItem(LS.tok,t)}catch(e){}document.getElementById('pubMsg').textContent='Token kept on this PC.';renderData()}
 function publishData(){let raw='',ts='';try{raw=localStorage.getItem(LS.raw)||'';ts=localStorage.getItem(LS.ts)||''}catch(e){}
   if(!raw){alert('Nothing pasted on this PC yet. Paste today\'s data first (Data tab).');return}
-  const body=JSON.stringify({app:'wagamama',ver:VER,raw,ts,savedAt:new Date().toISOString()});const tok=pubToken();
+  const transfers={};Object.entries(DEC).forEach(([k,d])=>{if(d.type==='transfer'&&!d.cleared)transfers[k]=d});
+  const body=JSON.stringify({app:'wagamama',ver:VER,raw,ts,transfers,savedAt:new Date().toISOString()});const tok=pubToken();
   if(!tok){dl('data.json',body);alert('No publishing token on this PC: data.json downloaded. Upload it to SOPtracker/wagamama/ in GitHub, or add a token under Data & settings.');return}
   const headers={Authorization:'Bearer '+tok,Accept:'application/vnd.github+json'};const b=document.getElementById('pubDataBtn');b.disabled=true;
   fetch(PUB_API+OWN_DATA+'?t='+Date.now(),{headers,cache:'no-store'}).then(r=>r.ok?r.json():{}).then(cur=>
@@ -493,6 +495,7 @@ function clearDecisions(){if(!confirm('Clear every switch and transfer decision 
 function fetchShared(){
   const get=u=>fetch(u+'?t='+Date.now(),{cache:'no-store'}).then(r=>r.ok?r.json():null).catch(()=>null);
   Promise.all([get(OWN_DATA),get(SOP_DATA)]).then(([own,sop])=>{
+    if(IS_EDITOR&&own&&own.transfers&&!Object.values(DEC).some(d=>d.type==='transfer')){Object.assign(DEC,own.transfers);lsSet(LS.dec,DEC)}
     let localRaw='',localTs='';try{localRaw=localStorage.getItem(LS.raw)||'';localTs=localStorage.getItem(LS.ts)||''}catch(e){}
     if(IS_EDITOR&&localRaw){useData(parseRaw(localRaw),'your paste',localTs,'Pasted on this PC. "Forget paste" goes back to the tracker feed.');return}
     const cands=[];if(own&&own.raw)cands.push({d:parseRaw(own.raw),kind:'published Wagamama paste',ts:own.ts||own.savedAt||''});if(sop&&sop.raw)cands.push({d:parseRaw(sop.raw),kind:'Order tracker feed',ts:sop.ts||sop.savedAt||''});
