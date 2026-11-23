@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Wagamama code switch</title>
+<!-- Changelog: 2026-11-23 v1.8 - 'Ordered on an old code' tile replaced by 'Orders to action' (distinct orders with lines still needing action); old-code filter chip stays. -->
 <!-- Changelog: 2026-11-23 v1.7 - published history is merged into every PC (restores switch/transfer records the browser lacks); recovered the 10 switches done in Sage on 23 Nov into data.json. -->
 <!-- Changelog: 2026-11-23 v1.6 - actioned lines (switch ticked, transfer imported) leave Needs action and sit in history lists that survive publishes; Switch list (Excel) with history; pick list simplified to Luke's 9 columns; promised date stored on each decision; publish carries history. -->
 <!-- Changelog: 2026-11-23 v1.5 - Warehouse pick list (Excel) on the Stock transfer files tab: every transfer with the code/size on the pick note and the code/size the stock was moved from, so pickers check the right bin. SheetJS from cdnjs. -->
@@ -230,7 +231,7 @@ input.find{border:1px solid var(--line);border-radius:6px;padding:8px 11px;font-
 
 <script>
 /* ============================ constants ============================ */
-const VER='1.7';
+const VER='1.8';
 const IS_EDITOR=/[?&]edit\b/.test(location.search);
 const SOP_DATA='../data.json';                 // Order tracker feed, same GitHub Pages origin
 const OWN_DATA='data.json';                    // optional published paste from wagamama_live.sql
@@ -342,10 +343,10 @@ function render(){
   const nSw=dec.filter(d=>d.type==='switch'&&!d.done).length, nTr=dec.filter(d=>d.type==='transfer'&&!d.imported).length;
   document.getElementById('n-action').textContent=sh.length;document.getElementById('n-action').className='n'+(sh.length?' hot':'');
   document.getElementById('n-switch').textContent=nSw;document.getElementById('n-transfer').textContent=nTr;document.getElementById('n-all').textContent=M.lines.length;
-  const alt=sh.filter(l=>l.kind==='alt').length,size=sh.filter(l=>l.kind==='size').length,none=sh.filter(l=>l.kind==='none'||l.kind==='part').length,old=sh.filter(l=>l.oldCode).length,late=sh.filter(l=>l.late).length;
+  const alt=sh.filter(l=>l.kind==='alt').length,size=sh.filter(l=>l.kind==='size').length,none=sh.filter(l=>l.kind==='none'||l.kind==='part').length,orders=new Set(sh.map(l=>l.r.doc)).size,late=sh.filter(l=>l.late).length;
   document.getElementById('tiles').innerHTML=
     tile('Short lines',sh.length,sh.length?'red':'green','of '+M.lines.length+' open Wagamama lines','all')+
-    tile('Ordered on an old code',old,old?'amber':'green','short lines on codes not on IT\'s list','old')+
+    tile('Orders to action',orders,orders?'red':'green',orders===1?'order with a short line':'orders with short lines','all')+
     tile('Same size elsewhere',alt,alt?'green':'','another code has the stock','alt')+
     tile('Size up / down only',size,size?'amber':'','XXS for XS, S for XS…','size')+
     tile('Nothing in stock',none,none?'red':'green','needs PO or wait','none')+
