@@ -119,6 +119,7 @@ orders, containers) and nothing else.
 
 ## Changelog
 
+- v2.11 (23 Nov 2026) – Late & at risk lists: the Waiting on column shows one line per item, "qty × code · WO / container / PO and date", like the production 10-day list. Overdue or missing cover shown in red.
 - v2.10 (18 Nov 2026) – Tibard codes bought from Oliver Harvey (Sage
   preferred supplier OLIVER, e.g. clogs) are covered by OH's shelf stock.
   The warehouse picks OH stock and despatches it in Tibard; Sage's overnight
