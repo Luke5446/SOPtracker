@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Wagamama code switch</title>
+<!-- Changelog: 2026-11-23 v2.1 - order summary and Can ship in full only count lines still to go (q3) and treat Sage allocation as q4; fully despatched orders no longer listed. -->
 <!-- Changelog: 2026-11-23 v2.0 - order header shows lines ready / short / in production (non T-shirt made-in-house codes) with a part-ship hint; Can ship in full tile + tab listing live Wagamama orders with every line allocated or in stock. -->
 <!-- Changelog: 2026-11-23 v1.9 - transfers imported after the current paste keep their stock moved (no double write-off on a second batch); write-off export refuses a batch that exceeds Sage holding per code; stale-data warning on the transfer tab. -->
 <!-- Changelog: 2026-11-23 v1.8 - 'Ordered on an old code' tile replaced by 'Orders to action' (distinct orders with lines still needing action); old-code filter chip stays. -->
@@ -193,7 +194,7 @@ input.find{border:1px solid var(--line);border-radius:6px;padding:8px 11px;font-
 
 <!-- ===================== ALL LINES ===================== -->
 <section class="view" id="v-ship">
-  <div class="note">Live Wagamama orders where every line is either allocated in Sage or covered by free stock on the ordered code, as of the last paste. Oldest promised first. Orders on hold are marked.</div>
+  <div class="note">Live Wagamama orders with something still to go where every open line is either allocated in Sage or covered by free stock on the ordered code, as of the last paste. Fully despatched orders are not listed. Oldest promised first. Orders on hold are marked.</div>
   <div class="card"><div class="tw"><table id="shipTable"><thead><tr><th>Order</th><th>Customer</th><th>Promised</th><th>Ordered</th><th class="num">Lines</th></tr></thead><tbody></tbody></table></div></div>
 </section>
 <section class="view" id="v-all">
@@ -241,7 +242,7 @@ input.find{border:1px solid var(--line);border-radius:6px;padding:8px 11px;font-
 
 <script>
 /* ============================ constants ============================ */
-const VER='2.0';
+const VER='2.1';
 const IS_EDITOR=/[?&]edit\b/.test(location.search);
 const SOP_DATA='../data.json';                 // Order tracker feed, same GitHub Pages origin
 const OWN_DATA='data.json';                    // optional published paste from wagamama_live.sql
@@ -296,7 +297,7 @@ function parseRaw(raw){
   (raw||'').split(/\r?\n/).forEach(line=>{
     if(!line.trim())return;const c=line.split('\t');if(c.length<14)return;
     const t=c[0].trim(), code=(c[3]||'').trim();
-    if(t==='SO'&&(c[7]||'').startsWith('WAG'))out.all.push({key:c[2],code,desc:c[4],doc:c[5],seq:n(c[6]),acct:c[7],cust:c[8],ref:c[9],date:c[10],q1:n(c[11]),q3:n(c[13]),status:c[27]||'',ordered:c[28]||''});
+    if(t==='SO'&&(c[7]||'').startsWith('WAG'))out.all.push({key:c[2],code,desc:c[4],doc:c[5],seq:n(c[6]),acct:c[7],cust:c[8],ref:c[9],date:c[10],q1:n(c[11]),q2:n(c[12]),q3:n(c[13]),q4:n(c[14]),status:c[27]||'',ordered:c[28]||''});
     if(t==='STK'&&(!c[1]||c[1]==='TIBARD'))out.stkAll[code]={free:n(c[13]),manu:c[19]||'',grp:c[22]||''};
     if(!code.startsWith('WAGTS'))return;
     const r={key:c[2],code,desc:c[4],doc:c[5],seq:n(c[6]),acct:c[7],cust:c[8],ref:c[9],date:c[10],q1:n(c[11]),q2:n(c[12]),q3:n(c[13]),q4:n(c[14]),status:c[27]||'',ordered:c[28]||'',co:c[1]};
@@ -343,11 +344,12 @@ function build(){
   M={stk,lines,byFam,short:lines.filter(l=>l.need>l.own&&!(l.dec&&(l.dec.done||l.dec.imported)))};
   // Order summary across every line on each Wagamama order (T-shirts from the maths above, other codes from Sage free stock oldest promised first).
   const byKey={};lines.forEach(l=>byKey[l.r.key]=l);const free={};Object.entries(DATA.stkAll||{}).forEach(([c,v])=>free[c]=v.free);
-  const ORD={};(DATA.all||[]).slice().sort((a,b)=>(a.date||'9')<(b.date||'9')?-1:1).forEach(r=>{
+  // Columns: q1 ordered, q2 despatched, q3 still to go, q4 allocated. Only lines with something to go count; a fully despatched order drops out.
+  const ORD={};(DATA.all||[]).filter(r=>r.q3>0).sort((a,b)=>(a.date||'9')<(b.date||'9')?-1:1).forEach(r=>{
     const o=ORD[r.doc]||(ORD[r.doc]={doc:r.doc,cust:r.cust,ref:r.ref,date:r.date,ordered:r.ordered,hold:r.status==='1',lines:0,ready:0,short:0,prod:0,shortCodes:[]});o.lines++;
     let ready=true,prod=false;
-    if(r.code.startsWith('WAGTS')){const l=byKey[r.key];ready=!l||l.need<=l.own}
-    else if(r.q3>0&&!/CHARGE|CARRIAGE|POSTAGE|FREET|DELIVERY/i.test(r.code)){const st=(DATA.stkAll||{})[r.code];if(st&&st.grp!=='54'){const t=Math.min(r.q3,Math.max(0,free[r.code]||0));free[r.code]-=t;if(t<r.q3){ready=false;prod=/tibard|oliver/i.test(st.manu)}}}
+    if(r.code.startsWith('WAGTS')){const l=byKey[r.key];ready=!!l&&l.need<=l.own}
+    else if(!/CHARGE|CARRIAGE|POSTAGE|FREET|DELIVERY/i.test(r.code)){const st=(DATA.stkAll||{})[r.code];if(st&&st.grp!=='54'){const need=Math.max(0,r.q3-r.q4);const t=Math.min(need,Math.max(0,free[r.code]||0));free[r.code]-=t;if(t<need){ready=false;prod=/tibard|oliver/i.test(st.manu)}}}
     if(ready)o.ready++;else{o.short++;o.shortCodes.push(r.code);if(prod)o.prod++}
   });
   M.orders=ORD;M.shipFull=Object.values(ORD).filter(o=>o.lines&&o.ready===o.lines).sort((a,b)=>(a.date||'9')<(b.date||'9')?-1:1);
