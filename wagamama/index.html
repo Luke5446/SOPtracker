@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Wagamama code switch</title>
+<!-- Changelog: 2026-11-23 v1.9 - transfers imported after the current paste keep their stock moved (no double write-off on a second batch); write-off export refuses a batch that exceeds Sage holding per code; stale-data warning on the transfer tab. -->
 <!-- Changelog: 2026-11-23 v1.8 - 'Ordered on an old code' tile replaced by 'Orders to action' (distinct orders with lines still needing action); old-code filter chip stays. -->
 <!-- Changelog: 2026-11-23 v1.7 - published history is merged into every PC (restores switch/transfer records the browser lacks); recovered the 10 switches done in Sage on 23 Nov into data.json. -->
 <!-- Changelog: 2026-11-23 v1.6 - actioned lines (switch ticked, transfer imported) leave Needs action and sit in history lists that survive publishes; Switch list (Excel) with history; pick list simplified to Luke's 9 columns; promised date stored on each decision; publish carries history. -->
@@ -82,6 +83,7 @@ td.num,th.num{text-align:right;font-variant-numeric:tabular-nums;white-space:now
 .acts{white-space:nowrap}
 .acts .btn{margin:1px 2px}
 .note{font-size:11.5px;color:var(--mut);background:#f7f9fc;border-left:3px solid var(--gold);padding:8px 10px;border-radius:0 6px 6px 0;margin:10px 0;line-height:1.5}
+.amber-note{background:#fff7e6;border-left-color:#d97706;color:#7c4a03}
 .grid{border-collapse:separate;border-spacing:0}
 .grid th.fam{text-align:left;background:#fff}
 .grid td.cell{padding:5px 6px;min-width:96px;border-left:1px solid #eef1f6}
@@ -176,6 +178,7 @@ input.find{border:1px solid var(--line);border-radius:6px;padding:8px 11px;font-
   <div class="note">Garments moved from an alternative code onto the code the customer ordered, so the order picks and despatches as it stands. Two Sage import files per batch:
     <b>Write-off</b> (TIB write-off layout, Manual Reduction, Reference1 <code id="refOff"></code>, Reference2 = order number) and <b>Add stock</b> (TIB_Add_Stock layout, Reference1 <code id="refAdd"></code> + order number, max 20 characters).
     Export both, import them in Sage, then press <b>Mark imported</b>. <b>Warehouse pick list</b> is an Excel sheet of every transfer, waiting and imported: the pick note shows the size ordered, the sheet says which code and size the garments were actually moved from, so the picker checks the right bin. Allocation on the order follows in Sage. Transfers are decided and exported from the editor only; the record (waiting and imported) is kept across pastes and saved in the repo with each Publish.</div>
+  <div class="note amber-note" id="trStale" style="display:none"></div>
   <div class="card"><h2>Waiting to import <span class="r" id="trCount"></span>
     <button class="btn btn-p btn-sm edit-only" onclick="exportTransfers('off')">&#8681; Write-off file</button>
     <button class="btn btn-p btn-sm edit-only" onclick="exportTransfers('add')">&#8681; Add-stock file</button>
@@ -231,7 +234,7 @@ input.find{border:1px solid var(--line);border-radius:6px;padding:8px 11px;font-
 
 <script>
 /* ============================ constants ============================ */
-const VER='1.8';
+const VER='1.9';
 const IS_EDITOR=/[?&]edit\b/.test(location.search);
 const SOP_DATA='../data.json';                 // Order tracker feed, same GitHub Pages origin
 const OWN_DATA='data.json';                    // optional published paste from wagamama_live.sql
@@ -305,6 +308,8 @@ function build(){
   Object.values(stk).forEach(s=>{s.poOut=s.poLines.reduce((a,r)=>a+r.q3,0);s.poFirst=s.poLines.map(r=>r.date).filter(Boolean).sort()[0]||'';
     // Available to share out = physical stock. Sage's allocation on these lines is rarely set, so the dashboard shares it itself.
     s.avail=s.inStock});
+  // Transfers imported into Sage after this paste was taken are not in the stock figures yet: move the stock here so a second batch cannot write off the same units twice.
+  M_PEND={};pendingImports().forEach(d=>{(d.picks||[]).forEach(pk=>{if(stk[pk.code]){stk[pk.code].avail-=pk.qty;M_PEND[pk.code]=(M_PEND[pk.code]||0)+pk.qty}});if(stk[d.from])stk[d.from].avail+=(d.picks||[]).reduce((a,pk)=>a+pk.qty,0)});
   // SO lines still outstanding, oldest promised first
   const lines=DATA.so.filter(r=>r.q3>0).map(r=>{const s=stk[r.code];const d=DEC[r.key];return {r,s,p:s.p,need:r.q3,own:0,picks:[],short:0,dec:d&&!d.cleared?d:null,late:r.date&&r.date<todayISO()}});
   lines.sort((a,b)=>(a.r.date||'9')<(b.r.date||'9')?-1:(a.r.date||'9')>(b.r.date||'9')?1:(a.r.doc<b.r.doc?-1:a.r.doc>b.r.doc?1:a.r.seq-b.r.seq));
@@ -425,15 +430,22 @@ function copySwitchList(){const rows=Object.values(DEC).filter(d=>d.type==='swit
 
 function renderTransfer(){const all=Object.entries(DEC).filter(([k,d])=>d.type==='transfer'&&!d.cleared);
   const todo=all.filter(([k,d])=>!d.imported), hist=all.filter(([k,d])=>d.imported).sort((a,b)=>a[1].imported<b[1].imported?1:-1);
+  const pend=pendingImports(),stale=document.getElementById('trStale');if(pend.length){stale.style.display='block';stale.innerHTML='<b>Sage data is older than your last import</b> ('+pend.length+' imported line'+(pend.length===1?'':'s')+' not in it yet). The stock they moved is already deducted here, but paste fresh data before the next batch to be safe.'}else stale.style.display='none';
   document.getElementById('trCount').textContent=todo.length+' line'+(todo.length===1?'':'s');document.getElementById('trHistCount').textContent=hist.length+' line'+(hist.length===1?'':'s');
   const tb=document.querySelector('#trTable tbody');
   tb.innerHTML=todo.length?todo.map(([k,d])=>'<tr><td><b>'+esc(soNo(d.doc))+'</b> line '+d.seq+'</td><td>'+esc(d.cust)+'</td><td>'+(d.picks||[]).map(p=>'<span class="code">'+esc(p.code)+'</span>').join('<br>')+'</td><td><span class="code">'+esc(d.from)+'</span></td><td class="num">'+(d.picks||[]).map(p=>p.qty).join('<br>')+'</td><td class="desc">'+fmtTs(d.when)+'</td><td class="acts"><button class="btn btn-o btn-sm" onclick="undoDecision(\''+esc(k)+'\')">Undo</button></td></tr>').join(''):'<tr><td colspan="7" class="empty">Nothing waiting to import.</td></tr>';
   document.querySelector('#trHist tbody').innerHTML=hist.length?hist.map(([k,d])=>'<tr><td class="desc">'+fmtTs(d.imported)+'</td><td>'+esc(soNo(d.doc))+' line '+d.seq+'</td><td>'+ukDate(promisedOf(k,d))+'</td><td>'+(d.picks||[]).map(p=>'<span class="code">'+esc(p.code)+'</span>').join('<br>')+'</td><td><span class="code">'+esc(d.from)+'</span></td><td class="num">'+(d.picks||[]).map(p=>p.qty).join('<br>')+'</td><td class="acts edit-only"><button class="btn btn-o btn-sm" onclick="undoDecision(\''+esc(k)+'\')">Undo</button></td></tr>').join(''):'<tr><td colspan="7" class="empty">No batches imported yet.</td></tr>';
 }
 function transferRows(){return Object.values(DEC).filter(d=>d.type==='transfer'&&!d.cleared&&!d.imported)}
+// Imported transfers the current paste cannot yet show (imported after the paste, with a 15 min margin for the SQL run time).
+let M_PEND={};
+function pendingImports(){const cut=SRC.ts?new Date(new Date(SRC.ts).getTime()-15*60000).toISOString():'';return Object.values(DEC).filter(d=>d.type==='transfer'&&!d.cleared&&d.imported&&(!cut||d.imported>cut))}
+function sageHolding(code){const s=M.stk[code];return s?s.inStock-(M_PEND[code]||0):0}
+function overStock(todo){const tot={};todo.forEach(d=>(d.picks||[]).forEach(p=>{tot[p.code]=(tot[p.code]||0)+p.qty}));return Object.entries(tot).filter(([c,q])=>q>sageHolding(c)).map(([c,q])=>c+': file writes off '+q+', Sage holds '+sageHolding(c))}
 function csv(rows){return rows.map(r=>r.map(v=>{v=String(v==null?'':v);return /[",\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v}).join(',')).join('\r\n')+'\r\n'}
 function dl(name,text){const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([text],{type:'text/csv'}));a.download=name;document.body.appendChild(a);a.click();setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove()},500)}
 function exportTransfers(which){const todo=transferRows();if(!todo.length){alert('Nothing waiting to import.');return}
+  const over=overStock(todo);if(over.length){alert('Not exported: this batch would write off more than Sage holds.\n\n'+over.join('\n')+'\n\nUndo or re-choose those lines, or paste fresh Sage data first.');return}
   const date=ukDate(todayISO()), stamp=todayISO();let rows;
   if(which==='off'){rows=[['StockCode','Location','Bin','Qty','Reference1','Reference2','ActivityDate','WriteOffCat']];
     todo.forEach(d=>(d.picks||[]).forEach(p=>rows.push([p.code,SET.loc,'',Math.round(p.qty),sageRef(SET.refOff),sageRef(soNo(d.doc)),date,'Manual Reduction'])));
