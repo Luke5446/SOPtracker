@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Wagamama code switch</title>
+<!-- Changelog: 2026-11-23 v1.6 - actioned lines (switch ticked, transfer imported) leave Needs action and sit in history lists that survive publishes; Switch list (Excel) with history; pick list simplified to Luke's 9 columns; promised date stored on each decision; publish carries history. -->
 <!-- Changelog: 2026-11-23 v1.5 - Warehouse pick list (Excel) on the Stock transfer files tab: every transfer with the code/size on the pick note and the code/size the stock was moved from, so pickers check the right bin. SheetJS from cdnjs. -->
 <!-- Changelog: 2026-11-20 v1.4 - Transfer stock and its write-off / add-stock exports are editor-only again; transfer records survive new pastes and are saved into data.json (transfers) on Publish. View-only keeps Switch in Sage per browser. -->
 <!-- Changelog: 2026-11-20 v1.3 - one Publish button (data only). Decide buttons, Switch list and the write-off / add-stock exports work on the view-only screen; decisions live in that browser and are cleared when the next publish arrives. decisions.json dropped. -->
@@ -147,7 +148,7 @@ input.find{border:1px solid var(--line);border-radius:6px;padding:8px 11px;font-
   <div class="note">A line is <b>short</b> when the stock on the code ordered, shared out to the oldest promised date first, does not cover it.
     The suggestion is the code in the same colour and sleeve length with the most free stock: same size first, then a size up or down.
     <b>Switch in Sage</b> = amend the order line to the other code (goes on the Switch list). <b>Transfer stock</b> = move the garments onto the ordered code instead,
-    with a Sage write-off and add-stock file (goes on the Stock transfer files tab). Switch decisions are kept in this browser only and are cleared when the next day's data is published. Transfer stock is done from the editor and its record is saved in the repo on Publish. Codes not on IT's current list are flagged <span class="badge amber">old code</span>.</div>
+    with a Sage write-off and add-stock file (goes on the Stock transfer files tab). Once a line is ticked off as changed in Sage or its transfer is imported it leaves this list and sits in the history on the Switch / Stock transfer tabs. Switches not yet done are cleared by the next publish; done switches and all transfers are kept. Codes not on IT's current list are flagged <span class="badge amber">old code</span>.</div>
   <div class="card"><div class="tw"><table id="actTable"><thead><tr>
     <th>Order / line</th><th>Code ordered</th><th class="num">Need</th><th>Stock on code</th><th>Suggested cover</th><th class="acts">Decide</th></tr></thead><tbody></tbody></table></div></div>
 </section>
@@ -161,9 +162,11 @@ input.find{border:1px solid var(--line);border-radius:6px;padding:8px 11px;font-
 
 <!-- ===================== SWITCH LIST ===================== -->
 <section class="view" id="v-switch">
-  <div class="note">Lines this PC has decided to amend in Sage: delete the line on the old code and add the new code for the same quantity and price (Sage has no bulk edit, see the Data tab). Tick each one once Sage is changed. The list is cleared when the next day's data is published, by which time Sage shows the new code.</div>
-  <div class="card"><h2>To amend in Sage <span class="r" id="swCount"></span><button class="btn btn-o btn-sm" onclick="copySwitchList()">Copy list</button></h2>
+  <div class="note">Lines this PC has decided to amend in Sage: delete the line on the old code and add the new code for the same quantity and price (Sage has no bulk edit, see the Data tab). Tick each one once Sage is changed. Ticked lines move to the Changed in Sage history below (kept across publishes); untouched ones clear on the next publish.</div>
+  <div class="card"><h2>To amend in Sage <span class="r" id="swCount"></span><button class="btn btn-o btn-sm" onclick="copySwitchList()">Copy list</button><button class="btn btn-o btn-sm" onclick="exportSwitchList()" title="Excel: order, promised, old code, new code, qty, with the history">&#8681; Switch list (Excel)</button></h2>
     <div class="tw"><table id="swTable"><thead><tr><th>Order</th><th>Customer</th><th>Line</th><th>Old code</th><th>New code</th><th class="num">Qty</th><th>Decided</th><th class="acts"></th></tr></thead><tbody></tbody></table></div></div>
+  <div class="card"><h2>Changed in Sage <span class="r" id="swHistCount"></span></h2>
+    <div class="tw"><table id="swHist"><thead><tr><th>Changed</th><th>Order</th><th>Promised</th><th>Old code</th><th>New code</th><th class="num">Qty</th><th class="acts edit-only"></th></tr></thead><tbody></tbody></table></div></div>
 </section>
 
 <!-- ===================== TRANSFER FILES ===================== -->
@@ -177,7 +180,7 @@ input.find{border:1px solid var(--line);border-radius:6px;padding:8px 11px;font-
     <button class="btn btn-o btn-sm edit-only" onclick="exportPickList()" title="Excel list for the warehouse: the code on the pick list and the code the stock was really moved from">&#8681; Warehouse pick list (Excel)</button>
     <button class="btn btn-g btn-sm edit-only" onclick="markImported()">&#10003; Mark imported</button></h2>
     <div class="tw"><table id="trTable"><thead><tr><th>Order</th><th>Customer</th><th>Write off (from)</th><th>Add stock (to)</th><th class="num">Qty</th><th>Decided</th><th class="acts"></th></tr></thead><tbody></tbody></table></div></div>
-  <div class="card"><h2>Imported batches <span class="r" id="trHistCount"></span></h2><div class="tw"><table id="trHist"><thead><tr><th>Imported</th><th>Order</th><th>From</th><th>To</th><th class="num">Qty</th></tr></thead><tbody></tbody></table></div></div>
+  <div class="card"><h2>Imported batches <span class="r" id="trHistCount"></span></h2><div class="tw"><table id="trHist"><thead><tr><th>Imported</th><th>Order</th><th>Promised</th><th>From</th><th>To</th><th class="num">Qty</th><th class="acts edit-only"></th></tr></thead><tbody></tbody></table></div></div>
 </section>
 
 <!-- ===================== ALL LINES ===================== -->
@@ -226,7 +229,7 @@ input.find{border:1px solid var(--line);border-radius:6px;padding:8px 11px;font-
 
 <script>
 /* ============================ constants ============================ */
-const VER='1.5';
+const VER='1.6';
 const IS_EDITOR=/[?&]edit\b/.test(location.search);
 const SOP_DATA='../data.json';                 // Order tracker feed, same GitHub Pages origin
 const OWN_DATA='data.json';                    // optional published paste from wagamama_live.sql
@@ -320,7 +323,8 @@ function build(){
   });
   lines.forEach(l=>{l.short=Math.max(0,l.short);l.kind=l.short<=0&&l.picks.length===0?'ok':l.picks.length&&l.picks.every(p=>!p.sizeDiff)?'alt':l.picks.length?'size':'none';
     if(l.need>l.own&&l.short>0&&l.picks.length)l.kind='part';l.oldCode=!l.s.active});
-  M={stk,lines,byFam,short:lines.filter(l=>l.need>l.own)};
+  // Actioned lines (switch ticked off, transfer imported) move to the history lists and leave Needs action.
+  M={stk,lines,byFam,short:lines.filter(l=>l.need>l.own&&!(l.dec&&(l.dec.done||l.dec.imported)))};
 }
 
 /* ============================ rendering ============================ */
@@ -391,19 +395,30 @@ function decide(key,type){const l=lineByKey(key);if(!l)return;let picks=l.picks.
     type=IS_EDITOR&&!confirm('OK = Switch in Sage (amend the order to '+pickS.code+').\nCancel = Transfer stock (write off '+pickS.code+', add stock to '+l.s.code+').')?'transfer':'switch';
   }
   if(type==='leave')picks=[];
-  DEC[key]={type,picks,when:new Date().toISOString(),doc:l.r.doc,seq:l.r.seq,cust:l.r.cust,from:l.s.code,need:l.need};
+  DEC[key]={type,picks,when:new Date().toISOString(),doc:l.r.doc,seq:l.r.seq,cust:l.r.cust,from:l.s.code,need:l.need,promised:l.r.date||''};
   saveDecisions();rebuild();
 }
 function undoDecision(key){DEC[key]={cleared:true,when:new Date().toISOString()};saveDecisions();rebuild()}
 function saveDecisions(){lsSet(LS.dec,DEC)}
 function rebuild(){build();render()}
 
-function renderSwitch(){const rows=Object.entries(DEC).filter(([k,d])=>d.type==='switch'&&!d.cleared).sort((a,b)=>a[1].doc<b[1].doc?-1:1);
-  document.getElementById('swCount').textContent=rows.filter(([k,d])=>!d.done).length+' to do';
-  const tb=document.querySelector('#swTable tbody');if(!rows.length){tb.innerHTML='<tr><td colspan="8" class="empty">No switches decided yet.</td></tr>';return}
+function promisedOf(k,d){if(d.promised)return d.promised;const l=M.lines.find(x=>x.r.key===k);return l?l.r.date:''}
+function renderSwitch(){const all=Object.entries(DEC).filter(([k,d])=>d.type==='switch'&&!d.cleared);
+  const rows=all.filter(([k,d])=>!d.done).sort((a,b)=>a[1].doc<b[1].doc?-1:1), hist=all.filter(([k,d])=>d.done).sort((a,b)=>a[1].done<b[1].done?1:-1);
+  document.getElementById('swCount').textContent=rows.length+' to do';document.getElementById('swHistCount').textContent=hist.length+' line'+(hist.length===1?'':'s');
+  document.querySelector('#swHist tbody').innerHTML=hist.length?hist.map(([k,d])=>'<tr><td class="desc">'+fmtTs(d.done)+'</td><td><b>'+esc(soNo(d.doc))+'</b> line '+d.seq+'</td><td>'+ukDate(promisedOf(k,d))+'</td><td><span class="code">'+esc(d.from)+'</span></td><td>'+(d.picks||[]).map(p=>'<span class="code">'+esc(p.code)+'</span>').join('<br>')+'</td><td class="num">'+(d.picks||[]).map(p=>p.qty).join('<br>')+'</td><td class="acts edit-only"><button class="btn btn-o btn-sm" onclick="undoDecision(\''+esc(k)+'\')">Undo</button></td></tr>').join(''):'<tr><td colspan="7" class="empty">Nothing changed in Sage yet.</td></tr>';
+  const tb=document.querySelector('#swTable tbody');if(!rows.length){tb.innerHTML='<tr><td colspan="8" class="empty">No switches waiting.</td></tr>';return}
   tb.innerHTML=rows.map(([k,d])=>'<tr class="'+(d.done?'done':'')+'"><td><b>'+esc(soNo(d.doc))+'</b></td><td>'+esc(d.cust)+'</td><td>'+d.seq+'</td><td><span class="code">'+esc(d.from)+'</span></td><td>'+(d.picks||[]).map(p=>'<span class="code">'+esc(p.code)+'</span>').join('<br>')+'</td><td class="num">'+(d.picks||[]).map(p=>p.qty).join('<br>')+'</td><td class="desc">'+fmtTs(d.when)+(d.done?'<br>done '+fmtTs(d.done):'')+'</td><td class="acts">'+(d.done?'':'<button class="btn btn-g btn-sm" onclick="markDone(\''+esc(k)+'\')">✓ Changed in Sage</button>')+'<button class="btn btn-o btn-sm" onclick="undoDecision(\''+esc(k)+'\')">Undo</button></td></tr>').join('');
 }
 function markDone(k){if(DEC[k]){DEC[k].done=new Date().toISOString();saveDecisions();rebuild()}}
+function xlsxOk(){if(typeof XLSX==='undefined'){alert('The Excel library did not load (no internet to cdnjs). Reload the page and try again.');return false}return true}
+function exportSwitchList(){if(!xlsxOk())return;
+  const all=Object.entries(DEC).filter(([k,d])=>d.type==='switch'&&!d.cleared);if(!all.length){alert('No switches decided yet.');return}
+  const data=[['Order','Promised','Old code','New code','Qty','Decided','Changed in Sage']];
+  all.sort((a,b)=>(a[1].done?1:0)-(b[1].done?1:0)||(a[1].doc<b[1].doc?-1:1)).forEach(([k,d])=>(d.picks||[]).forEach(p=>data.push([soNo(d.doc),ukDate(promisedOf(k,d)),d.from,p.code,p.qty,ukDate((d.when||'').slice(0,10)),d.done?ukDate(d.done.slice(0,10)):''])));
+  const ws=XLSX.utils.aoa_to_sheet(data);ws['!cols']=[8,11,18,18,5,11,15].map(w=>({wch:w}));ws['!autofilter']={ref:XLSX.utils.encode_range({s:{r:0,c:0},e:{r:data.length-1,c:6}})};
+  const wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,ws,'Sage switches');XLSX.writeFile(wb,'Wagamama_switch_list_'+todayISO()+'.xlsx');
+}
 function copySwitchList(){const rows=Object.values(DEC).filter(d=>d.type==='switch'&&!d.cleared&&!d.done);const t=rows.map(d=>'SO '+soNo(d.doc)+' line '+d.seq+': '+d.from+' -> '+(d.picks||[]).map(p=>p.code+' x'+p.qty).join(', ')).join('\n');navigator.clipboard&&navigator.clipboard.writeText(t).then(()=>alert('Copied '+rows.length+' lines.'),()=>prompt('Copy:',t))}
 
 function renderTransfer(){const all=Object.entries(DEC).filter(([k,d])=>d.type==='transfer'&&!d.cleared);
@@ -411,7 +426,7 @@ function renderTransfer(){const all=Object.entries(DEC).filter(([k,d])=>d.type==
   document.getElementById('trCount').textContent=todo.length+' line'+(todo.length===1?'':'s');document.getElementById('trHistCount').textContent=hist.length+' line'+(hist.length===1?'':'s');
   const tb=document.querySelector('#trTable tbody');
   tb.innerHTML=todo.length?todo.map(([k,d])=>'<tr><td><b>'+esc(soNo(d.doc))+'</b> line '+d.seq+'</td><td>'+esc(d.cust)+'</td><td>'+(d.picks||[]).map(p=>'<span class="code">'+esc(p.code)+'</span>').join('<br>')+'</td><td><span class="code">'+esc(d.from)+'</span></td><td class="num">'+(d.picks||[]).map(p=>p.qty).join('<br>')+'</td><td class="desc">'+fmtTs(d.when)+'</td><td class="acts"><button class="btn btn-o btn-sm" onclick="undoDecision(\''+esc(k)+'\')">Undo</button></td></tr>').join(''):'<tr><td colspan="7" class="empty">Nothing waiting to import.</td></tr>';
-  document.querySelector('#trHist tbody').innerHTML=hist.length?hist.map(([k,d])=>'<tr><td class="desc">'+fmtTs(d.imported)+'</td><td>'+esc(soNo(d.doc))+'</td><td>'+(d.picks||[]).map(p=>'<span class="code">'+esc(p.code)+'</span>').join('<br>')+'</td><td><span class="code">'+esc(d.from)+'</span></td><td class="num">'+(d.picks||[]).map(p=>p.qty).join('<br>')+'</td></tr>').join(''):'<tr><td colspan="5" class="empty">No batches imported yet.</td></tr>';
+  document.querySelector('#trHist tbody').innerHTML=hist.length?hist.map(([k,d])=>'<tr><td class="desc">'+fmtTs(d.imported)+'</td><td>'+esc(soNo(d.doc))+' line '+d.seq+'</td><td>'+ukDate(promisedOf(k,d))+'</td><td>'+(d.picks||[]).map(p=>'<span class="code">'+esc(p.code)+'</span>').join('<br>')+'</td><td><span class="code">'+esc(d.from)+'</span></td><td class="num">'+(d.picks||[]).map(p=>p.qty).join('<br>')+'</td><td class="acts edit-only"><button class="btn btn-o btn-sm" onclick="undoDecision(\''+esc(k)+'\')">Undo</button></td></tr>').join(''):'<tr><td colspan="7" class="empty">No batches imported yet.</td></tr>';
 }
 function transferRows(){return Object.values(DEC).filter(d=>d.type==='transfer'&&!d.cleared&&!d.imported)}
 function csv(rows){return rows.map(r=>r.map(v=>{v=String(v==null?'':v);return /[",\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v}).join(',')).join('\r\n')+'\r\n'}
@@ -425,16 +440,12 @@ function exportTransfers(which){const todo=transferRows();if(!todo.length){alert
     todo.forEach(d=>{const q=(d.picks||[]).reduce((a,p)=>a+Math.round(p.qty),0);rows.push([d.from,SET.loc,'',q,'',sageRef(SET.refAdd+' '+soNo(d.doc),soNo(d.doc))])});
     dl('Wagamama_AddStock_'+stamp+'.csv',csv(rows))}
 }
-function exportPickList(){
-  if(typeof XLSX==='undefined'){alert('The Excel library did not load (no internet to cdnjs). Reload the page and try again.');return}
-  const rows=Object.values(DEC).filter(d=>d.type==='transfer'&&!d.cleared).sort((a,b)=>(a.imported?1:0)-(b.imported?1:0)||(a.doc<b.doc?-1:1));
-  if(!rows.length){alert('No stock transfers recorded yet.');return}
-  const ln=k=>M.lines.find(l=>l.r.key===k);const info=c=>{const s=M.stk[c];const p=(s&&s.p)||parseCode(c,s&&s.desc);return {desc:s?s.desc:'',size:p?p.size:''}};
-  const data=[['Order','Customer','Line','Promised','Code on pick list','Size on pick list','Pick from code','Pick from size','Pick from description','Qty','Status','Decided','Imported to Sage']];
-  Object.entries(DEC).forEach(([k,d])=>{if(d.type!=='transfer'||d.cleared)return;const l=ln(k);const from=info(d.from);
-    (d.picks||[]).forEach(p=>{const to=info(p.code);data.push([soNo(d.doc),d.cust||(l?l.r.cust:''),d.seq,l?ukDate(l.r.date):'',d.from,from.size,p.code,to.size,to.desc,p.qty,d.imported?'Imported in Sage':'Waiting to import',ukDate((d.when||'').slice(0,10)),d.imported?ukDate(d.imported.slice(0,10)):''])})});
-  data.sort((a,b)=>a===data[0]?-1:b===data[0]?1:(a[10]<b[10]?-1:a[10]>b[10]?1:(a[0]<b[0]?-1:a[0]>b[0]?1:0)));
-  const ws=XLSX.utils.aoa_to_sheet(data);ws['!cols']=[8,34,5,11,18,8,18,8,46,5,18,11,11].map(w=>({wch:w}));ws['!autofilter']={ref:XLSX.utils.encode_range({s:{r:0,c:0},e:{r:data.length-1,c:12}})};
+function exportPickList(){if(!xlsxOk())return;
+  const all=Object.entries(DEC).filter(([k,d])=>d.type==='transfer'&&!d.cleared);if(!all.length){alert('No stock transfers recorded yet.');return}
+  const info=c=>{const st=M.stk[c];const p=(st&&st.p)||parseCode(c,st&&st.desc);return {desc:st?st.desc:'',size:p?p.size:''}};
+  const data=[['Order','Promised','Code on pick list','Pick from code','Pick from size','Pick from description','Qty','Decided','Imported to Sage']];
+  all.sort((a,b)=>(a[1].imported?1:0)-(b[1].imported?1:0)||(a[1].doc<b[1].doc?-1:1)).forEach(([k,d])=>(d.picks||[]).forEach(p=>{const to=info(p.code);data.push([soNo(d.doc),ukDate(promisedOf(k,d)),d.from,p.code,to.size,to.desc,p.qty,ukDate((d.when||'').slice(0,10)),d.imported?ukDate(d.imported.slice(0,10)):''])}));
+  const ws=XLSX.utils.aoa_to_sheet(data);ws['!cols']=[8,11,18,18,8,52,5,11,15].map(w=>({wch:w}));ws['!autofilter']={ref:XLSX.utils.encode_range({s:{r:0,c:0},e:{r:data.length-1,c:8}})};
   const wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,ws,'Wagamama transfers');XLSX.writeFile(wb,'Wagamama_pick_list_'+todayISO()+'.xlsx');
 }
 function markImported(){const todo=Object.entries(DEC).filter(([k,d])=>d.type==='transfer'&&!d.cleared&&!d.imported);if(!todo.length)return;
@@ -487,7 +498,7 @@ function clearPaste(){try{localStorage.removeItem(LS.raw);localStorage.removeIte
 function useData(d,kind,ts,note){DATA=d;SRC={kind,ts,note};
   // Decisions belong to one day's data: a newer publish clears them (Sage then shows the switched codes).
   let had='';try{had=localStorage.getItem(LS.decTs)||''}catch(e){}
-  if(ts&&had!==ts){if(had){Object.keys(DEC).forEach(k=>{if(DEC[k].type!=='transfer')delete DEC[k]});lsSet(LS.dec,DEC)}try{localStorage.setItem(LS.decTs,ts)}catch(e){}}
+  if(ts&&had!==ts){if(had){Object.keys(DEC).forEach(k=>{const d=DEC[k];if(d.cleared||d.type==='leave'||(d.type==='switch'&&!d.done))delete DEC[k]});lsSet(LS.dec,DEC)}try{localStorage.setItem(LS.decTs,ts)}catch(e){}}
   rebuild();renderData()}
 
 /* ---- publishing decisions ---- */
@@ -495,8 +506,8 @@ function pubToken(){try{return localStorage.getItem(LS.tok)||localStorage.getIte
 function saveToken(){const t=document.getElementById('setToken').value.trim();if(!t)return;try{localStorage.setItem(LS.tok,t)}catch(e){}document.getElementById('pubMsg').textContent='Token kept on this PC.';renderData()}
 function publishData(){let raw='',ts='';try{raw=localStorage.getItem(LS.raw)||'';ts=localStorage.getItem(LS.ts)||''}catch(e){}
   if(!raw){alert('Nothing pasted on this PC yet. Paste today\'s data first (Data tab).');return}
-  const transfers={};Object.entries(DEC).forEach(([k,d])=>{if(d.type==='transfer'&&!d.cleared)transfers[k]=d});
-  const body=JSON.stringify({app:'wagamama',ver:VER,raw,ts,transfers,savedAt:new Date().toISOString()});const tok=pubToken();
+  const transfers={},history={};Object.entries(DEC).forEach(([k,d])=>{if(d.cleared)return;if(d.type==='transfer')transfers[k]=d;if(d.type==='transfer'||(d.type==='switch'&&d.done))history[k]=d});
+  const body=JSON.stringify({app:'wagamama',ver:VER,raw,ts,transfers,history,savedAt:new Date().toISOString()});const tok=pubToken();
   if(!tok){dl('data.json',body);alert('No publishing token on this PC: data.json downloaded. Upload it to SOPtracker/wagamama/ in GitHub, or add a token under Data & settings.');return}
   const headers={Authorization:'Bearer '+tok,Accept:'application/vnd.github+json'};const b=document.getElementById('pubDataBtn');b.disabled=true;
   fetch(PUB_API+OWN_DATA+'?t='+Date.now(),{headers,cache:'no-store'}).then(r=>r.ok?r.json():{}).then(cur=>
@@ -510,7 +521,7 @@ function clearDecisions(){if(!confirm('Clear every switch and transfer decision 
 function fetchShared(){
   const get=u=>fetch(u+'?t='+Date.now(),{cache:'no-store'}).then(r=>r.ok?r.json():null).catch(()=>null);
   Promise.all([get(OWN_DATA),get(SOP_DATA)]).then(([own,sop])=>{
-    if(IS_EDITOR&&own&&own.transfers&&!Object.values(DEC).some(d=>d.type==='transfer')){Object.assign(DEC,own.transfers);lsSet(LS.dec,DEC)}
+    if(IS_EDITOR&&own&&(own.history||own.transfers)&&!Object.values(DEC).some(d=>d.type==='transfer'||(d.type==='switch'&&d.done))){Object.assign(DEC,own.history||own.transfers);lsSet(LS.dec,DEC)}
     let localRaw='',localTs='';try{localRaw=localStorage.getItem(LS.raw)||'';localTs=localStorage.getItem(LS.ts)||''}catch(e){}
     if(IS_EDITOR&&localRaw){useData(parseRaw(localRaw),'your paste',localTs,'Pasted on this PC. "Forget paste" goes back to the tracker feed.');return}
     const cands=[];if(own&&own.raw)cands.push({d:parseRaw(own.raw),kind:'published Wagamama paste',ts:own.ts||own.savedAt||''});if(sop&&sop.raw)cands.push({d:parseRaw(sop.raw),kind:'Order tracker feed',ts:sop.ts||sop.savedAt||''});
