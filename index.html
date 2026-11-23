@@ -328,7 +328,7 @@ textarea{width:100%;min-height:150px;font-size:11px;font-family:Consolas,monospa
    "Contested": a line only has stock because it is older than another order
    that will go short on the same code.
    ═══════════════════════════════════════════════════════════════════════ */
-const APP_VER='2.10';
+const APP_VER='2.11';
 const LS_RAW='ordertracker_raw', LS_TS='ordertracker_ts', LS_SET='ordertracker_settings', LS_DUE='ordertracker_wodue', LS_EMBX='ordertracker_embexp';
 const DEF_SET={
   made:['Tibard','Oliver Harvey','Clockwork','Clockwork Clothing','Clockwork Giant Clothing'],
@@ -805,18 +805,21 @@ function lineWhere(ln){
 }
 function expCell(ln){if(ln.out<=0||ln.charge||ln.freetext)return '–';if(ln.unknown)return '<span class="sm">unknown</span>';const d=ln.expected;const p=ln.promD;return `<span${p&&d>p?' style="color:var(--red);font-weight:700"':''}>${fd(d)}</span>`}
 function orderExp(o){if(o.unknown)return '<span class="sm">unknown</span>';if(!o.waiting.length)return '<span class="sm">now</span>';const p=o.promD;return `<span${p&&o.expected>p?' style="color:var(--red);font-weight:700"':''}>${fd(o.expected)}</span>`}
+// v2.11: one line per item, like the production list – "1 × CODE · WO-1390 due 20 Nov – overdue"
 function waitSummary(o){
-  const parts=[];const seen=new Set();
+  const parts=[];const seen=new Map();
   o.waiting.forEach(l=>l.sources.forEach(s=>{
-    let k='';
-    if(s.t==='wo')k=s.ref+' due '+(s.due?fd(pd(s.due)):'?');
-    else if(s.t==='cont')k=s.ref+' lands '+fd(pd(s.date));
-    else if(s.t==='po')k=(s.po.src.ic?'via Tibard PO ':'PO ')+soNo(s.po.src.doc)+(s.po.src.ic?'':' '+(s.po.src.acctName||'')+' '+(s.po.date?fd(s.po.date):'no date'));
-    else if(s.t==='short')k=(l.made?'not on a works order':'no PO')+': '+l.base;
-    else if(s.t==='smpend')k='special make, no WO: '+l.base;
-    if(k&&!seen.has(k)){seen.add(k);parts.push(k)}
+    let k='',bad=false;
+    if(s.t==='wo'){k=s.ref+(s.embOnly?' (EMB)':'')+' due '+(s.due?fd(pd(s.due)):'?')+(s.overdue?' – overdue':'');bad=!!s.overdue||!s.due}
+    else if(s.t==='cont'){const d=pd(s.date);k=s.ref+' lands '+fd(d)+(d&&d<today()?' – overdue':'');bad=!d||d<today()}
+    else if(s.t==='po'){k=(s.po.src.ic?'via Tibard PO ':'PO ')+soNo(s.po.src.doc)+(s.po.src.ic?'':' '+(s.po.src.acctName||'')+' '+(s.po.date?fd(s.po.date)+(s.overdue?' – overdue':''):'no date'));bad=!!s.overdue||(!s.po.src.ic&&!s.po.date)}
+    else if(s.t==='short'){k=l.made?'not on a works order':'no PO';bad=true}
+    else if(s.t==='smpend'){k='special make, no WO';bad=true}
+    if(!k)return;
+    const id=l.base+'|'+k;
+    if(seen.has(id))seen.get(id).qty+=s.qty||0;else{const p={code:l.base,qty:s.qty||0,k,bad};seen.set(id,p);parts.push(p)}
   }));
-  return parts.slice(0,4).map(esc).join('<br>')+(parts.length>4?'<br><span class="sm">+'+(parts.length-4)+' more</span>':'');
+  return parts.slice(0,6).map(p=>`<div><b>${fmt(p.qty)}</b> × <span class="code">${esc(p.code)}</span> · <span${p.bad?' style="color:var(--red)"':''}>${esc(p.k)}</span></div>`).join('')+(parts.length>6?'<div class="sm">+'+(parts.length-6)+' more – open the order</div>':'');
 }
 
 /* ── render ────────────────────────────────────────────────────────────── */
@@ -960,7 +963,7 @@ function orderTable(list,tab){
   if(!list.length)return '<div class="empty">Nothing here.</div>';
   let h=`<div class="tw"><table><thead><tr>${th(tab,'status','Status')}${th(tab,'so','Order')}${th(tab,'cust','Customer')}${th(tab,'added','Ordered')}${th(tab,'prom','Promised')}${th(tab,'days','Days')}${th(tab,'out','To go','num')}<th>Waiting on</th>${th(tab,'exp','Expected')}${th(tab,'group','Type')}</tr></thead><tbody>`;
   list.forEach(o=>{
-    h+=`<tr class="${rowCls(o)}" onclick="openOrder('${esc(o.key)}')"><td>${pill(o.status)}${npsPill(o)}${o.contested?' <span class="pill p-amber" title="Stock contested on at least one line">&#9888;</span>':''}${o.hold?' <span class="pill p-grey">Hold</span>':''}${o.special?' <span class="pill p-gold" title="Special make: '+o.special+' non-stock line'+(o.special>1?'s':'')+'">SM</span>':''}</td><td>${coTag(o.co)} <span class="code">${esc(o.doc)}</span></td><td>${esc(custName(o))}<div class="desc">${custName(o)===o.ref.trim().replace(/^(EMB|DTF):\s*/i,'')?esc(o.acctName):esc(o.ref)}</div></td><td>${fd(pd(o.added))}</td><td>${fd(o.promD)}</td><td>${daysCell(o)}</td><td class="num">${fmt(o.outQty)}<div class="sm">${o.outLines} line${o.outLines===1?'':'s'}</div></td><td class="sm" style="color:var(--txt)">${o.waiting.length?waitSummary(o):'<span class="sm">in stock</span>'}</td><td>${orderExp(o)}</td><td>${groupPill(o.group)}</td></tr>`;
+    h+=`<tr class="${rowCls(o)}" onclick="openOrder('${esc(o.key)}')"><td>${pill(o.status)}${npsPill(o)}${o.contested?' <span class="pill p-amber" title="Stock contested on at least one line">&#9888;</span>':''}${o.hold?' <span class="pill p-grey">Hold</span>':''}${o.special?' <span class="pill p-gold" title="Special make: '+o.special+' non-stock line'+(o.special>1?'s':'')+'">SM</span>':''}</td><td>${coTag(o.co)} <span class="code">${esc(o.doc)}</span></td><td>${esc(custName(o))}<div class="desc">${custName(o)===o.ref.trim().replace(/^(EMB|DTF):\s*/i,'')?esc(o.acctName):esc(o.ref)}</div></td><td>${fd(pd(o.added))}</td><td>${fd(o.promD)}</td><td>${daysCell(o)}</td><td class="num">${fmt(o.outQty)}<div class="sm">${o.outLines} line${o.outLines===1?'':'s'}</div></td><td class="sm summary-list" style="color:var(--txt)">${o.waiting.length?waitSummary(o):'<span class="sm">in stock</span>'}</td><td>${orderExp(o)}</td><td>${groupPill(o.group)}</td></tr>`;
   });
   return h+'</tbody></table></div>';
 }
@@ -995,7 +998,7 @@ function meetTable(list,tab){
   const isP=tab==='prod10';
   let h=`<div class="tw"><table><thead><tr>${th(tab,'status','Status')}${th(tab,'so','Order')}${th(tab,'cust','Customer')}${th(tab,'prom','Promised')}${th(tab,'days','Days')}${th(tab,'out','To go','num')}${isP?'<th>In production</th>':'<th>Embroidery / transfer</th><th>Garments</th>'}${th(tab,'exp','Expected')}</tr></thead><tbody>`;
   list.forEach(o=>{
-    h+=`<tr class="${rowCls(o)}" onclick="openOrder('${esc(o.key)}')"><td>${pill(o.status)}${npsPill(o)}${o.special?' <span class="pill p-gold" title="Special make">SM</span>':''}</td><td>${coTag(o.co)} <span class="code">${esc(o.doc)}</span></td><td>${esc(custName(o))}<div class="desc">${custName(o)===o.ref.trim().replace(/^(EMB|DTF):\s*/i,'')?esc(o.acctName):esc(o.ref)}</div></td><td>${fd(o.promD)}</td><td>${daysCell(o)}</td><td class="num">${fmt(o.outQty)}<div class="sm">${o.outLines} line${o.outLines===1?'':'s'}</div></td>${isP?`<td class="sm summary-list" style="color:var(--txt)">${prodSummary(o)}</td>`:`<td class="sm summary-list" style="color:var(--txt)">${embSummary(o)}</td><td class="sm" style="color:var(--txt)">${o.waiting.length?waitSummary(o):'<span class="pill p-green">In stock</span>'}</td>`}<td>${isP?orderExp(o):embExpCell(o)}</td></tr>`;
+    h+=`<tr class="${rowCls(o)}" onclick="openOrder('${esc(o.key)}')"><td>${pill(o.status)}${npsPill(o)}${o.special?' <span class="pill p-gold" title="Special make">SM</span>':''}</td><td>${coTag(o.co)} <span class="code">${esc(o.doc)}</span></td><td>${esc(custName(o))}<div class="desc">${custName(o)===o.ref.trim().replace(/^(EMB|DTF):\s*/i,'')?esc(o.acctName):esc(o.ref)}</div></td><td>${fd(o.promD)}</td><td>${daysCell(o)}</td><td class="num">${fmt(o.outQty)}<div class="sm">${o.outLines} line${o.outLines===1?'':'s'}</div></td>${isP?`<td class="sm summary-list" style="color:var(--txt)">${prodSummary(o)}</td>`:`<td class="sm summary-list" style="color:var(--txt)">${embSummary(o)}</td><td class="sm summary-list" style="color:var(--txt)">${o.waiting.length?waitSummary(o):'<span class="pill p-green">In stock</span>'}</td>`}<td>${isP?orderExp(o):embExpCell(o)}</td></tr>`;
   });
   return h+'</tbody></table></div>';
 }
@@ -1004,7 +1007,7 @@ function exportMeetCsv(tab){
   const cell=s=>'"'+String(s==null?'':s).replace(/"/g,'""')+'"';
   const lines=[['Status','Company','SO','Customer','Account','Their ref','Ordered','Promised','Days','Lines to go','Qty to go'].concat(isP?['In production']:['Embroidery / transfer','Garments'],['Expected']).map(cell).join(',')];
   rows.forEach(o=>{
-    const g=o.waiting.length?waitSummary(o).replace(/<br>/g,' | ').replace(/<[^>]+>/g,'').replace(/&amp;/g,'&').replace(/&#39;/g,"'").replace(/&quot;/g,'"').replace(/&lt;/g,'<').replace(/&gt;/g,'>'):'in stock';
+    const g=o.waiting.length?waitSummary(o).replace(/<\/div>\s*<div[^>]*>/g,' | ').replace(/<[^>]+>/g,'').replace(/&amp;/g,'&').replace(/&#39;/g,"'").replace(/&quot;/g,'"').replace(/&lt;/g,'<').replace(/&gt;/g,'>'):'in stock';
     lines.push([STATUS_PILL[o.status][1],o.co,o.doc,custName(o),o.acct,o.ref,o.added,o.promised,o.days,o.outLines,o.outQty].concat(isP?[prodSummary(o,true)]:[embSummary(o,true),g],[o.expSet?iso(o.expSet):o.unknown?'unknown':iso(o.expected)]).map(cell).join(','));
   });
   const a=document.createElement('a');a.href=URL.createObjectURL(new Blob(['\ufeff'+lines.join('\r\n')],{type:'text/csv'}));a.download=(isP?'production':'embroidery')+'-list-'+iso(today())+'.csv';document.body.appendChild(a);a.click();setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove()},500);
