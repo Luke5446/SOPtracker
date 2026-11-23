@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Wagamama code switch</title>
+<!-- Changelog: 2026-11-23 v1.7 - published history is merged into every PC (restores switch/transfer records the browser lacks); recovered the 10 switches done in Sage on 23 Nov into data.json. -->
 <!-- Changelog: 2026-11-23 v1.6 - actioned lines (switch ticked, transfer imported) leave Needs action and sit in history lists that survive publishes; Switch list (Excel) with history; pick list simplified to Luke's 9 columns; promised date stored on each decision; publish carries history. -->
 <!-- Changelog: 2026-11-23 v1.5 - Warehouse pick list (Excel) on the Stock transfer files tab: every transfer with the code/size on the pick note and the code/size the stock was moved from, so pickers check the right bin. SheetJS from cdnjs. -->
 <!-- Changelog: 2026-11-20 v1.4 - Transfer stock and its write-off / add-stock exports are editor-only again; transfer records survive new pastes and are saved into data.json (transfers) on Publish. View-only keeps Switch in Sage per browser. -->
@@ -229,7 +230,7 @@ input.find{border:1px solid var(--line);border-radius:6px;padding:8px 11px;font-
 
 <script>
 /* ============================ constants ============================ */
-const VER='1.6';
+const VER='1.7';
 const IS_EDITOR=/[?&]edit\b/.test(location.search);
 const SOP_DATA='../data.json';                 // Order tracker feed, same GitHub Pages origin
 const OWN_DATA='data.json';                    // optional published paste from wagamama_live.sql
@@ -521,7 +522,8 @@ function clearDecisions(){if(!confirm('Clear every switch and transfer decision 
 function fetchShared(){
   const get=u=>fetch(u+'?t='+Date.now(),{cache:'no-store'}).then(r=>r.ok?r.json():null).catch(()=>null);
   Promise.all([get(OWN_DATA),get(SOP_DATA)]).then(([own,sop])=>{
-    if(IS_EDITOR&&own&&(own.history||own.transfers)&&!Object.values(DEC).some(d=>d.type==='transfer'||(d.type==='switch'&&d.done))){Object.assign(DEC,own.history||own.transfers);lsSet(LS.dec,DEC)}
+    // Published history (done switches + transfers) is merged into every PC: anything the repo holds that this browser lacks is restored.
+    const pubHist=own&&(own.history||own.transfers);if(pubHist){let added=0;Object.entries(pubHist).forEach(([k,d])=>{if(!DEC[k]){DEC[k]=d;added++}});if(added)lsSet(LS.dec,DEC)}
     let localRaw='',localTs='';try{localRaw=localStorage.getItem(LS.raw)||'';localTs=localStorage.getItem(LS.ts)||''}catch(e){}
     if(IS_EDITOR&&localRaw){useData(parseRaw(localRaw),'your paste',localTs,'Pasted on this PC. "Forget paste" goes back to the tracker feed.');return}
     const cands=[];if(own&&own.raw)cands.push({d:parseRaw(own.raw),kind:'published Wagamama paste',ts:own.ts||own.savedAt||''});if(sop&&sop.raw)cands.push({d:parseRaw(sop.raw),kind:'Order tracker feed',ts:sop.ts||sop.savedAt||''});
