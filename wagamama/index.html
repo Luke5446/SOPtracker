@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Wagamama code switch</title>
+<!-- Changelog: 2026-11-23 v1.5 - Warehouse pick list (Excel) on the Stock transfer files tab: every transfer with the code/size on the pick note and the code/size the stock was moved from, so pickers check the right bin. SheetJS from cdnjs. -->
 <!-- Changelog: 2026-11-20 v1.4 - Transfer stock and its write-off / add-stock exports are editor-only again; transfer records survive new pastes and are saved into data.json (transfers) on Publish. View-only keeps Switch in Sage per browser. -->
 <!-- Changelog: 2026-11-20 v1.3 - one Publish button (data only). Decide buttons, Switch list and the write-off / add-stock exports work on the view-only screen; decisions live in that browser and are cleared when the next publish arrives. decisions.json dropped. -->
 <!-- Changelog: 2026-11-19 v1.2 - fix: the Paste, Settings and Publishing cards on the Data tab stayed hidden in editor mode (inline display:none beat the editor CSS). -->
@@ -12,6 +13,7 @@
      lines are short on the code the customer ordered, which alternative code (same size, or a size up/down) has the
      stock, switch-in-Sage checklist, and Sage write-off / add-stock files for stock moved between codes. Reads the
      Order tracker's published data.json (../data.json) by default, or a paste from wagamama_live.sql. -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <style>
 :root{
   --navy:#1F3864; --navy2:#2a4a80; --steel:#5b7ba6; --gold:#C9A24B;
@@ -168,10 +170,11 @@ input.find{border:1px solid var(--line);border-radius:6px;padding:8px 11px;font-
 <section class="view" id="v-transfer">
   <div class="note">Garments moved from an alternative code onto the code the customer ordered, so the order picks and despatches as it stands. Two Sage import files per batch:
     <b>Write-off</b> (TIB write-off layout, Manual Reduction, Reference1 <code id="refOff"></code>, Reference2 = order number) and <b>Add stock</b> (TIB_Add_Stock layout, Reference1 <code id="refAdd"></code> + order number, max 20 characters).
-    Export both, import them in Sage, then press <b>Mark imported</b>. Allocation on the order follows in Sage. Transfers are decided and exported from the editor only; the record (waiting and imported) is kept across pastes and saved in the repo with each Publish.</div>
+    Export both, import them in Sage, then press <b>Mark imported</b>. <b>Warehouse pick list</b> is an Excel sheet of every transfer, waiting and imported: the pick note shows the size ordered, the sheet says which code and size the garments were actually moved from, so the picker checks the right bin. Allocation on the order follows in Sage. Transfers are decided and exported from the editor only; the record (waiting and imported) is kept across pastes and saved in the repo with each Publish.</div>
   <div class="card"><h2>Waiting to import <span class="r" id="trCount"></span>
     <button class="btn btn-p btn-sm edit-only" onclick="exportTransfers('off')">&#8681; Write-off file</button>
     <button class="btn btn-p btn-sm edit-only" onclick="exportTransfers('add')">&#8681; Add-stock file</button>
+    <button class="btn btn-o btn-sm edit-only" onclick="exportPickList()" title="Excel list for the warehouse: the code on the pick list and the code the stock was really moved from">&#8681; Warehouse pick list (Excel)</button>
     <button class="btn btn-g btn-sm edit-only" onclick="markImported()">&#10003; Mark imported</button></h2>
     <div class="tw"><table id="trTable"><thead><tr><th>Order</th><th>Customer</th><th>Write off (from)</th><th>Add stock (to)</th><th class="num">Qty</th><th>Decided</th><th class="acts"></th></tr></thead><tbody></tbody></table></div></div>
   <div class="card"><h2>Imported batches <span class="r" id="trHistCount"></span></h2><div class="tw"><table id="trHist"><thead><tr><th>Imported</th><th>Order</th><th>From</th><th>To</th><th class="num">Qty</th></tr></thead><tbody></tbody></table></div></div>
@@ -223,7 +226,7 @@ input.find{border:1px solid var(--line);border-radius:6px;padding:8px 11px;font-
 
 <script>
 /* ============================ constants ============================ */
-const VER='1.4';
+const VER='1.5';
 const IS_EDITOR=/[?&]edit\b/.test(location.search);
 const SOP_DATA='../data.json';                 // Order tracker feed, same GitHub Pages origin
 const OWN_DATA='data.json';                    // optional published paste from wagamama_live.sql
@@ -421,6 +424,18 @@ function exportTransfers(which){const todo=transferRows();if(!todo.length){alert
   else{rows=[['StockCode','Location','Bin','Qty','StockExported','Reference1']];
     todo.forEach(d=>{const q=(d.picks||[]).reduce((a,p)=>a+Math.round(p.qty),0);rows.push([d.from,SET.loc,'',q,'',sageRef(SET.refAdd+' '+soNo(d.doc),soNo(d.doc))])});
     dl('Wagamama_AddStock_'+stamp+'.csv',csv(rows))}
+}
+function exportPickList(){
+  if(typeof XLSX==='undefined'){alert('The Excel library did not load (no internet to cdnjs). Reload the page and try again.');return}
+  const rows=Object.values(DEC).filter(d=>d.type==='transfer'&&!d.cleared).sort((a,b)=>(a.imported?1:0)-(b.imported?1:0)||(a.doc<b.doc?-1:1));
+  if(!rows.length){alert('No stock transfers recorded yet.');return}
+  const ln=k=>M.lines.find(l=>l.r.key===k);const info=c=>{const s=M.stk[c];const p=(s&&s.p)||parseCode(c,s&&s.desc);return {desc:s?s.desc:'',size:p?p.size:''}};
+  const data=[['Order','Customer','Line','Promised','Code on pick list','Size on pick list','Pick from code','Pick from size','Pick from description','Qty','Status','Decided','Imported to Sage']];
+  Object.entries(DEC).forEach(([k,d])=>{if(d.type!=='transfer'||d.cleared)return;const l=ln(k);const from=info(d.from);
+    (d.picks||[]).forEach(p=>{const to=info(p.code);data.push([soNo(d.doc),d.cust||(l?l.r.cust:''),d.seq,l?ukDate(l.r.date):'',d.from,from.size,p.code,to.size,to.desc,p.qty,d.imported?'Imported in Sage':'Waiting to import',ukDate((d.when||'').slice(0,10)),d.imported?ukDate(d.imported.slice(0,10)):''])})});
+  data.sort((a,b)=>a===data[0]?-1:b===data[0]?1:(a[10]<b[10]?-1:a[10]>b[10]?1:(a[0]<b[0]?-1:a[0]>b[0]?1:0)));
+  const ws=XLSX.utils.aoa_to_sheet(data);ws['!cols']=[8,34,5,11,18,8,18,8,46,5,18,11,11].map(w=>({wch:w}));ws['!autofilter']={ref:XLSX.utils.encode_range({s:{r:0,c:0},e:{r:data.length-1,c:12}})};
+  const wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,ws,'Wagamama transfers');XLSX.writeFile(wb,'Wagamama_pick_list_'+todayISO()+'.xlsx');
 }
 function markImported(){const todo=Object.entries(DEC).filter(([k,d])=>d.type==='transfer'&&!d.cleared&&!d.imported);if(!todo.length)return;
   if(!confirm('Mark '+todo.length+' transfer line'+(todo.length===1?'':'s')+' as imported into Sage? Export both files first.'))return;
