@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Wagamama code switch</title>
+<!-- Changelog: 2026-11-23 v2.2 - Needs action chip 'Nothing in stock, no live PO': short lines without a same-size alternative and with no live PO on the ordered code (size up/down lines included). -->
 <!-- Changelog: 2026-11-23 v2.1 - order summary and Can ship in full only count lines still to go (q3); fully despatched orders no longer listed; non T-shirt codes share physical stock oldest promised first, Sage allocation ignored (only set at despatch). -->
 <!-- Changelog: 2026-11-23 v2.0 - order header shows lines ready / short / in production (non T-shirt made-in-house codes) with a part-ship hint; Can ship in full tile + tab listing live Wagamama orders with every line allocated or in stock. -->
 <!-- Changelog: 2026-11-23 v1.9 - transfers imported after the current paste keep their stock moved (no double write-off on a second batch); write-off export refuses a batch that exceeds Sage holding per code; stale-data warning on the transfer tab. -->
@@ -151,6 +152,7 @@ input.find{border:1px solid var(--line);border-radius:6px;padding:8px 11px;font-
     <span class="chip" data-f="alt">Alternative available</span>
     <span class="chip" data-f="size">Only a size up/down</span>
     <span class="chip" data-f="none">Nothing in stock</span>
+    <span class="chip" data-f="nopo" title="Short lines with no same-size alternative and no live PO on the ordered code; size up/down suggestions included">Nothing in stock, no live PO</span>
     <span class="chip" data-f="late">Late</span>
   </div>
   <div class="note">A line is <b>short</b> when the stock on the code ordered, shared out to the oldest promised date first, does not cover it.
@@ -242,7 +244,7 @@ input.find{border:1px solid var(--line);border-radius:6px;padding:8px 11px;font-
 
 <script>
 /* ============================ constants ============================ */
-const VER='2.1';
+const VER='2.2';
 const IS_EDITOR=/[?&]edit\b/.test(location.search);
 const SOP_DATA='../data.json';                 // Order tracker feed, same GitHub Pages origin
 const OWN_DATA='data.json';                    // optional published paste from wagamama_live.sql
@@ -392,7 +394,7 @@ function setActFilter(f){if(f==='ship'){showTab('ship');return}actFilter=f;docum
 function fmtTs(ts){const d=new Date(ts);return isNaN(d)?ts:d.toLocaleString('en-GB',{day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'})}
 
 function renderAction(){
-  let rows=M.short.filter(l=>actFilter==='all'||(actFilter==='old'&&l.oldCode)||(actFilter==='alt'&&l.kind==='alt')||(actFilter==='size'&&l.kind==='size')||(actFilter==='none'&&(l.kind==='none'||l.kind==='part'))||(actFilter==='late'&&l.late));
+  let rows=M.short.filter(l=>actFilter==='all'||(actFilter==='old'&&l.oldCode)||(actFilter==='alt'&&l.kind==='alt')||(actFilter==='size'&&l.kind==='size')||(actFilter==='none'&&(l.kind==='none'||l.kind==='part'))||(actFilter==='late'&&l.late)||(actFilter==='nopo'&&l.kind!=='alt'&&l.kind!=='ok'&&!(l.s.poOut>0)));
   const tb=document.querySelector('#actTable tbody');
   if(!rows.length){tb.innerHTML='<tr><td colspan="6" class="empty">'+(M.lines.length?'Nothing short here.':'No data loaded yet.')+'</td></tr>';return}
   let h='',lastDoc='';
