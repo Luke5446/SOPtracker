@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Wagamama code switch</title>
+<!-- Changelog: 2026-11-24 v2.3 - search box (order number or product code) on Needs action and Can ship in full; Can ship in full sortable by Promised / Ordered. -->
 <!-- Changelog: 2026-11-23 v2.2 - Needs action chip 'Nothing in stock, no live PO': short lines without a same-size alternative and with no live PO on the ordered code (size up/down lines included). -->
 <!-- Changelog: 2026-11-23 v2.1 - order summary and Can ship in full only count lines still to go (q3); fully despatched orders no longer listed; non T-shirt codes share physical stock oldest promised first, Sage allocation ignored (only set at despatch). -->
 <!-- Changelog: 2026-11-23 v2.0 - order header shows lines ready / short / in production (non T-shirt made-in-house codes) with a part-ship hint; Can ship in full tile + tab listing live Wagamama orders with every line allocated or in stock. -->
@@ -86,6 +87,7 @@ td.num,th.num{text-align:right;font-variant-numeric:tabular-nums;white-space:now
 .acts{white-space:nowrap}
 .acts .btn{margin:1px 2px}
 .note{font-size:11.5px;color:var(--mut);background:#f7f9fc;border-left:3px solid var(--gold);padding:8px 10px;border-radius:0 6px 6px 0;margin:10px 0;line-height:1.5}
+.sortable{cursor:pointer;user-select:none} .sortable:hover{color:var(--navy)}
 .osum{font-size:12px;color:var(--mut)} .badge.blue{background:#e0ebff;color:#1d4ed8}
 .amber-note{background:#fff7e6;border-left-color:#d97706;color:#7c4a03}
 .grid{border-collapse:separate;border-spacing:0}
@@ -146,6 +148,7 @@ input.find{border:1px solid var(--line);border-radius:6px;padding:8px 11px;font-
 <!-- ===================== NEEDS ACTION ===================== -->
 <section class="view on" id="v-action">
   <div class="tiles" id="tiles"></div>
+  <div class="filters"><input class="find" id="actFind" placeholder="Search order number or product code…" oninput="renderAction()"></div>
   <div class="filters" id="actFilters">
     <span class="chip on" data-f="all">All short lines</span>
     <span class="chip" data-f="old">Ordered on an old code</span>
@@ -197,7 +200,8 @@ input.find{border:1px solid var(--line);border-radius:6px;padding:8px 11px;font-
 <!-- ===================== ALL LINES ===================== -->
 <section class="view" id="v-ship">
   <div class="note">Live Wagamama orders with something still to go where every open line is covered by physical stock on the ordered code, shared out oldest promised date first (Sage allocation is ignored, as it is only set at despatch), as of the last paste. Fully despatched orders are not listed. Oldest promised first. Orders on hold are marked.</div>
-  <div class="card"><div class="tw"><table id="shipTable"><thead><tr><th>Order</th><th>Customer</th><th>Promised</th><th>Ordered</th><th class="num">Lines</th></tr></thead><tbody></tbody></table></div></div>
+  <div class="filters"><input class="find" id="shipFind" placeholder="Search order number or product code…" oninput="renderShip()"></div>
+  <div class="card"><div class="tw"><table id="shipTable"><thead><tr><th>Order</th><th>Customer</th><th class="sortable" onclick="shipSort('date')">Promised <span id="shipSortDate"></span></th><th class="sortable" onclick="shipSort('ordered')">Ordered <span id="shipSortOrdered"></span></th><th class="num">Lines</th></tr></thead><tbody></tbody></table></div></div>
 </section>
 <section class="view" id="v-all">
   <div class="filters"><input class="find" id="findIn" placeholder="Order number, customer, code or size…" oninput="renderAll()"></div>
@@ -244,7 +248,7 @@ input.find{border:1px solid var(--line);border-radius:6px;padding:8px 11px;font-
 
 <script>
 /* ============================ constants ============================ */
-const VER='2.2';
+const VER='2.3';
 const IS_EDITOR=/[?&]edit\b/.test(location.search);
 const SOP_DATA='../data.json';                 // Order tracker feed, same GitHub Pages origin
 const OWN_DATA='data.json';                    // optional published paste from wagamama_live.sql
@@ -349,7 +353,7 @@ function build(){
   // Columns: q1 ordered, q2 despatched, q3 still to go, q4 allocated. Only lines with something to go count; a fully despatched order drops out.
   // Sage allocation is only set at despatch, so it is ignored: physical stock is shared across live lines oldest promised first (same rule as the T-shirts).
   const ORD={};(DATA.all||[]).filter(r=>r.q3>0).sort((a,b)=>(a.date||'9')<(b.date||'9')?-1:1).forEach(r=>{
-    const o=ORD[r.doc]||(ORD[r.doc]={doc:r.doc,cust:r.cust,ref:r.ref,date:r.date,ordered:r.ordered,hold:r.status==='1',lines:0,ready:0,short:0,prod:0,shortCodes:[]});o.lines++;
+    const o=ORD[r.doc]||(ORD[r.doc]={doc:r.doc,cust:r.cust,ref:r.ref,date:r.date,ordered:r.ordered,hold:r.status==='1',lines:0,ready:0,short:0,prod:0,shortCodes:[],codes:[]});o.lines++;o.codes.push(r.code);
     let ready=true,prod=false;
     if(r.code.startsWith('WAGTS')){const l=byKey[r.key];ready=!!l&&l.need<=l.own}
     else if(!/CHARGE|CARRIAGE|POSTAGE|FREET|DELIVERY/i.test(r.code)){const st=(DATA.stkAll||{})[r.code];if(st&&st.grp!=='54'){const need=r.q3;const t=Math.min(need,Math.max(0,free[r.code]||0));free[r.code]-=t;if(t<need){ready=false;prod=/tibard|oliver/i.test(st.manu)}}}
@@ -357,6 +361,13 @@ function build(){
   });
   M.orders=ORD;M.shipFull=Object.values(ORD).filter(o=>o.lines&&o.ready===o.lines).sort((a,b)=>(a.date||'9')<(b.date||'9')?-1:1);
 }
+let SHIP={by:'date',asc:true};
+function shipSort(by){if(SHIP.by===by)SHIP.asc=!SHIP.asc;else SHIP={by,asc:true};renderShip()}
+function renderShip(){const q=(document.getElementById('shipFind').value||'').trim().toLowerCase();
+  document.getElementById('shipSortDate').textContent=SHIP.by==='date'?(SHIP.asc?'\u25B2':'\u25BC'):'';document.getElementById('shipSortOrdered').textContent=SHIP.by==='ordered'?(SHIP.asc?'\u25B2':'\u25BC'):'';
+  const rows=M.shipFull.filter(o=>!q||soNo(o.doc).includes(q)||(o.codes||[]).some(c=>c.toLowerCase().includes(q)))
+    .sort((a,b)=>{const x=a[SHIP.by]||'9',y=b[SHIP.by]||'9';return (x<y?-1:x>y?1:0)*(SHIP.asc?1:-1)});
+  document.querySelector('#shipTable tbody').innerHTML=rows.length?rows.map(o=>'<tr><td><b>'+esc(soNo(o.doc))+'</b>'+(o.hold?' <span class="badge amber">On hold</span>':'')+'</td><td>'+esc(o.cust)+'<div class="desc">'+esc(o.ref)+'</div></td><td class="'+(o.date&&o.date<todayISO()?'late':'')+'">'+ukDate(o.date)+'</td><td>'+ukDate(o.ordered)+'</td><td class="num">'+o.lines+'</td></tr>').join(''):'<tr><td colspan="5" class="empty">'+(M.shipFull.length?'No order matches.':'No order can ship in full on this data.')+'</td></tr>'}
 function orderSummary(doc){const o=M.orders&&M.orders[doc];if(!o)return '';const part=o.ready>0&&o.short>0;
   return '<span class="osum">'+o.lines+' line'+(o.lines===1?'':'s')+': <span class="badge green">'+o.ready+' in stock</span> <span class="badge '+(o.short?'red':'')+'">'+o.short+' short</span>'+(o.prod?' <span class="badge amber">'+o.prod+' in production</span>':'')+(part?' <span class="badge blue">part ship?</span>':'')+'</span>'}
 
@@ -383,8 +394,7 @@ function render(){
     tile('Size up / down only',size,size?'amber':'','XXS for XS, S for XS…','size')+
     tile('Nothing in stock',none,none?'red':'green','needs PO or wait','none')+
     tile('Late',late,late?'red':'green','promised date passed','late');
-  document.getElementById('n-ship').textContent=M.shipFull.length;
-  document.querySelector('#shipTable tbody').innerHTML=M.shipFull.length?M.shipFull.map(o=>'<tr><td><b>'+esc(soNo(o.doc))+'</b>'+(o.hold?' <span class="badge amber">On hold</span>':'')+'</td><td>'+esc(o.cust)+'<div class="desc">'+esc(o.ref)+'</div></td><td class="'+(o.date&&o.date<todayISO()?'late':'')+'">'+ukDate(o.date)+'</td><td>'+ukDate(o.ordered)+'</td><td class="num">'+o.lines+'</td></tr>').join(''):'<tr><td colspan="5" class="empty">No order can ship in full on this data.</td></tr>';
+  document.getElementById('n-ship').textContent=M.shipFull.length;renderShip();
   renderAction();renderGrid();renderSwitch();renderTransfer();renderAll();
   const st=document.getElementById('hdrStatus');st.innerHTML=SRC.ts?('Sage data '+esc(SRC.kind)+' · '+esc(fmtTs(SRC.ts))):'No data';
   document.getElementById('refOff').textContent=SET.refOff;document.getElementById('refAdd').textContent=SET.refAdd;
@@ -394,7 +404,8 @@ function setActFilter(f){if(f==='ship'){showTab('ship');return}actFilter=f;docum
 function fmtTs(ts){const d=new Date(ts);return isNaN(d)?ts:d.toLocaleString('en-GB',{day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'})}
 
 function renderAction(){
-  let rows=M.short.filter(l=>actFilter==='all'||(actFilter==='old'&&l.oldCode)||(actFilter==='alt'&&l.kind==='alt')||(actFilter==='size'&&l.kind==='size')||(actFilter==='none'&&(l.kind==='none'||l.kind==='part'))||(actFilter==='late'&&l.late)||(actFilter==='nopo'&&l.kind!=='alt'&&l.kind!=='ok'&&!(l.s.poOut>0)));
+  const q=(document.getElementById('actFind').value||'').trim().toLowerCase();
+  let rows=M.short.filter(l=>(!q||soNo(l.r.doc).includes(q)||l.r.code.toLowerCase().includes(q))&&(actFilter==='all'||(actFilter==='old'&&l.oldCode)||(actFilter==='alt'&&l.kind==='alt')||(actFilter==='size'&&l.kind==='size')||(actFilter==='none'&&(l.kind==='none'||l.kind==='part'))||(actFilter==='late'&&l.late)||(actFilter==='nopo'&&l.kind!=='alt'&&l.kind!=='ok'&&!(l.s.poOut>0))));
   const tb=document.querySelector('#actTable tbody');
   if(!rows.length){tb.innerHTML='<tr><td colspan="6" class="empty">'+(M.lines.length?'Nothing short here.':'No data loaded yet.')+'</td></tr>';return}
   let h='',lastDoc='';
