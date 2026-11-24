@@ -328,7 +328,7 @@ textarea{width:100%;min-height:150px;font-size:11px;font-family:Consolas,monospa
    "Contested": a line only has stock because it is older than another order
    that will go short on the same code.
    ═══════════════════════════════════════════════════════════════════════ */
-const APP_VER='2.11';
+const APP_VER='2.12';
 const LS_RAW='ordertracker_raw', LS_TS='ordertracker_ts', LS_SET='ordertracker_settings', LS_DUE='ordertracker_wodue', LS_EMBX='ordertracker_embexp';
 const DEF_SET={
   made:['Tibard','Oliver Harvey','Clockwork','Clockwork Clothing','Clockwork Giant Clothing'],
@@ -710,6 +710,12 @@ function build(){
     else if(!waiting.length)o.status='stock';
     else o.status='covered';
     o.noPart=noPartShip(o);   // v2.9: customer cannot take part despatches
+    // v2.12: can the whole order go out today? Every line still to go is covered by stock on the shelf now (Sage allocation,
+    // free stock handed out oldest promised date first, or OH shelf stock for a Tibard code bought from OH). Units on a
+    // completed works order not yet booked into Sage are counted separately: the order can go once the warehouse books them in.
+    const onShelf=s=>s.t==='alloc'||s.t==='stock'||s.t==='ohstock';
+    o.shipToday=o.status!=='hold'&&live.length>0&&live.every(l=>l.sources.length&&l.sources.every(onShelf));
+    o.shipBookIn=o.status!=='hold'&&live.length>0&&!o.shipToday&&live.every(l=>l.sources.length&&l.sources.every(s=>onShelf(s)||s.t==='pipe'));
     o.hay=(o.doc+' '+o.acctName+' '+o.acct+' '+o.ref+' '+o.user+' '+o.lines.map(l=>l.code+' '+l.desc).join(' ')+(o.noPart?" can't part ship":'')).toLowerCase();
   });
   pruneEmbX();
@@ -762,6 +768,8 @@ function vis(o){
 }
 const liveOrders=()=>ORDERS.filter(o=>o.status!=='done'&&vis(o));
 const riskOrders=()=>liveOrders().filter(o=>o.status==='late'||o.status==='risk');
+const shipNow=()=>liveOrders().filter(o=>o.shipToday);      // v2.12: can ship in full today
+const shipBookIn=()=>liveOrders().filter(o=>o.shipBookIn);  // v2.12: can ship once completed works orders are booked in
 const prod10=()=>liveOrders().filter(o=>o.needProd&&o.in10&&o.status!=='hold');   // v2.2 production meeting list
 const emb10=()=>liveOrders().filter(o=>o.emb&&o.in10&&o.status!=='hold');         // v2.2 embroidery meeting list
 
@@ -840,7 +848,8 @@ function renderHeader(){
   if(!DATA.so.length){h.innerHTML='No data loaded';return}
   const live=ORDERS.filter(o=>o.status!=='done'&&!o.ic).length;
   const nd=Object.keys(DUE).length,nx=embXPending();
-  h.innerHTML=`<b>${live}</b> live orders · Sage ${DATA.ts?fdt(DATA.ts):'?'}<br>WOs ${PP.ok?fdt(PP.savedAt):'<span style="color:#fca5a5">not read</span>'} · containers ${SP.ok?fdt(SP.savedAt):'<span style="color:#fca5a5">not read</span>'}${nd&&IS_EDITOR?` · <span style="color:#fcd34d">${nd} due date change${nd>1?'s':''} to publish</span>`:''}${nx&&IS_EDITOR?` · <span style="color:#fcd34d">${nx} expected date change${nx>1?'s':''} to publish</span>`:''}`;
+  const ship=ORDERS.filter(o=>o.shipToday&&!o.ic).length;   // v2.12
+  h.innerHTML=`<b>${live}</b> live orders · <b style="color:#86efac">${ship}</b> can ship in full today · Sage ${DATA.ts?fdt(DATA.ts):'?'}<br>WOs ${PP.ok?fdt(PP.savedAt):'<span style="color:#fca5a5">not read</span>'} · containers ${SP.ok?fdt(SP.savedAt):'<span style="color:#fca5a5">not read</span>'}${nd&&IS_EDITOR?` · <span style="color:#fcd34d">${nd} due date change${nd>1?'s':''} to publish</span>`:''}${nx&&IS_EDITOR?` · <span style="color:#fcd34d">${nx} expected date change${nx>1?'s':''} to publish</span>`:''}`;
 }
 
 // ── Find an order ──
@@ -1022,9 +1031,17 @@ function renderRisk(v){
   const lateProd=late.filter(o=>o.waitProd),lateSupp=late.filter(o=>o.waitSupp),noPO=all.filter(o=>o.noPO);
   const nps=liveOrders().filter(o=>o.noPart);   // v2.9: every live order for a customer that cannot take part despatches
   const p10=prod10(),e10=emb10(),AH=SET.ahead||10;
-  const tiles=[['late','red',late.length,'late (promised date passed)'],['lateProd','red',lateProd.length,'late – waiting on production'],['lateSupp','red',lateSupp.length,'late – waiting on suppliers (incl. Clockwork)'],['noPO','amber',noPO.length,'bought in – no PO raised (late or at risk)'],['risk','amber',risk.length,'at risk'],['contested','amber',contested.length,'stock contested'],['soon','steel',liveOrders().filter(o=>o.days!=null&&o.days>=0&&o.days<=SET.soon).length,`due within ${SET.soon} days`],['special','gold',special.length,`special makes (${special.filter(o=>o.specialWait>0).length} still in production)`],['nps','red',nps.length,`can't part ship – complete orders only (${nps.filter(o=>o.status==='late').length} late, ${nps.filter(o=>o.waiting.length).length} waiting)`],
+  const ship=shipNow(),shipB=shipBookIn();   // v2.12
+  const tiles=[['ship','green',ship.length,`of ${liveOrders().length} live orders can ship in full today (${ship.filter(o=>o.status==='late').length} late${shipB.length?', +'+shipB.length+' once booked in':''})`],['late','red',late.length,'late (promised date passed)'],['lateProd','red',lateProd.length,'late – waiting on production'],['lateSupp','red',lateSupp.length,'late – waiting on suppliers (incl. Clockwork)'],['noPO','amber',noPO.length,'bought in – no PO raised (late or at risk)'],['risk','amber',risk.length,'at risk'],['contested','amber',contested.length,'stock contested'],['soon','steel',liveOrders().filter(o=>o.days!=null&&o.days>=0&&o.days<=SET.soon).length,`due within ${SET.soon} days`],['special','gold',special.length,`special makes (${special.filter(o=>o.specialWait>0).length} still in production)`],['nps','red',nps.length,`can't part ship – complete orders only (${nps.filter(o=>o.status==='late').length} late, ${nps.filter(o=>o.waiting.length).length} waiting)`],
     ['prod10','navy',p10.length,`production list – next ${AH} working days + late (${p10.filter(o=>o.status==='late').length})`],['emb10','navy',e10.length,`embroidery &amp; transfer list – next ${AH} working days + late (${e10.filter(o=>o.status==='late').length})`]];
   let h=`<div class="tiles">${tiles.map(t=>`<div class="tile ${t[1]} ${UI.tile===t[0]?'on':''}" onclick="setTile('${t[0]}')"><b>${t[2]}</b><span>${t[3]}</span></div>`).join('')}</div>`;
+  if(UI.tile==='ship'){   // v2.12: orders the warehouse can pick and send complete today
+    const rows=sortBy(ship,'ship',{k:'prom',d:'a'});
+    h+=`<div class="sec"><h3>Can ship in full today <span class="n">${rows.length}</span><span class="r">every line still to go is in stock now · oldest promised date first · <a href="javascript:void(0)" onclick="exportCsv('ship')">Export CSV</a> · <a href="javascript:void(0)" onclick="window.print()">Print</a></span></h3><div class="card" style="margin-top:8px">${orderTable(rows,'ship')}</div></div>`;
+    if(shipB.length)h+=`<div class="sec"><h3>Can ship once booked in <span class="n">${shipB.length}</span><span class="r">in stock apart from units made on a completed works order that the warehouse has not booked into Sage yet · <a href="javascript:void(0)" onclick="exportCsv('shipBookIn')">Export CSV</a></span></h3><div class="card" style="margin-top:8px">${orderTable(sortBy(shipB,'shipBookIn',{k:'prom',d:'a'}),'shipBookIn')}</div></div>`;
+    h+=`<div class="legend"><span><b>In stock now</b> = Sage allocation, then free stock handed to the oldest promised date first (Sage only allocates at despatch, so the Sage allocated column is not relied on), then OH shelf stock for a Tibard code bought from Oliver Harvey.</span><span>Orders for customers that <b>can't part ship</b> are shown with the &#9940; mark; they are listed here only when the whole order can go, so they are safe to pick.</span><span>Refreshes with every data paste. On-hold and intercompany orders are not listed.</span></div>`;
+    v.innerHTML=h;return;
+  }
   if(UI.tile==='prod10'||UI.tile==='emb10'){   // v2.2: one list in date order for the morning meeting
     const isP=UI.tile==='prod10',rows=sortBy(isP?p10:e10,UI.tile,{k:'prom',d:'a'});
     h+=`<div class="sec"><h3>${isP?'Production':'Embroidery & transfers'} – late or due by ${fd(nextWorkDay(today(),AH))} <span class="n">${rows.length}</span><span class="r">${isP?'orders with goods still in production or needing a works order':'orders with embroidery or transfers to do'} · oldest promised date first · <a href="javascript:void(0)" onclick="exportCsv('${UI.tile}')">Export CSV</a> · <a href="javascript:void(0)" onclick="window.print()">Print</a></span></h3><div class="card" style="margin-top:8px">${meetTable(rows,UI.tile)}</div></div>`;
@@ -1047,15 +1064,15 @@ function setTile(t){UI.tile=UI.tile===t?'':t;render()}
 function exportCsv(g){
   if(g==='prod10'||g==='emb10')return exportMeetCsv(g);
   const all=riskOrders();
-  let list=all;if(UI.tile==='late')list=all.filter(o=>o.status==='late');else if(UI.tile==='lateProd')list=all.filter(o=>o.status==='late'&&o.waitProd);else if(UI.tile==='lateSupp')list=all.filter(o=>o.status==='late'&&o.waitSupp);else if(UI.tile==='noPO')list=all.filter(o=>o.noPO);else if(UI.tile==='risk')list=all.filter(o=>o.status==='risk');else if(UI.tile==='contested')list=liveOrders().filter(o=>o.contested);else if(UI.tile==='soon')list=liveOrders().filter(o=>o.days!=null&&o.days>=0&&o.days<=SET.soon);else if(UI.tile==='special')list=liveOrders().filter(o=>o.special>0);else if(UI.tile==='nps')list=liveOrders().filter(o=>o.noPart);
-  const rows=sortBy(list.filter(o=>o.group===g),'risk-'+g,{k:'days',d:'a'});
+  let list=all;if(g==='ship')list=shipNow();else if(g==='shipBookIn')list=shipBookIn();else if(UI.tile==='late')list=all.filter(o=>o.status==='late');else if(UI.tile==='lateProd')list=all.filter(o=>o.status==='late'&&o.waitProd);else if(UI.tile==='lateSupp')list=all.filter(o=>o.status==='late'&&o.waitSupp);else if(UI.tile==='noPO')list=all.filter(o=>o.noPO);else if(UI.tile==='risk')list=all.filter(o=>o.status==='risk');else if(UI.tile==='contested')list=liveOrders().filter(o=>o.contested);else if(UI.tile==='soon')list=liveOrders().filter(o=>o.days!=null&&o.days>=0&&o.days<=SET.soon);else if(UI.tile==='special')list=liveOrders().filter(o=>o.special>0);else if(UI.tile==='nps')list=liveOrders().filter(o=>o.noPart);
+  const rows=g==='ship'||g==='shipBookIn'?sortBy(list,g,{k:'prom',d:'a'}):sortBy(list.filter(o=>o.group===g),'risk-'+g,{k:'days',d:'a'});   // v2.12: ship lists are not split by type
   const cell=s=>'"'+String(s==null?'':s).replace(/"/g,'""')+'"';
   const lines=[['Status','Company','SO','Customer','Account','Their ref','Ordered','Promised','Days','Lines to go','Qty to go','Waiting on','Expected','Type','Part ship'].map(cell).join(',')];
   rows.forEach(o=>{
     const w=[];const seen=new Set();o.waiting.forEach(l=>l.sources.forEach(s=>{let k='';if(s.t==='wo')k=l.base+': '+s.ref+' due '+(s.due||'?');else if(s.t==='cont')k=l.base+': '+s.ref+' lands '+s.date;else if(s.t==='po')k=l.base+': PO '+soNo(s.po.src.doc)+' '+(s.po.src.acctName||'')+' '+(s.po.src.date||'no date');else if(s.t==='short')k=l.base+': not on order';else if(s.t==='smpend')k=l.base+': special make, no WO';if(k&&!seen.has(k)){seen.add(k);w.push(k)}}));
     lines.push([STATUS_PILL[o.status][1],o.co,o.doc,custName(o),o.acct,o.ref,o.added,o.promised,o.days,o.outLines,o.outQty,w.join(' | '),o.unknown?'unknown':iso(o.expected),GROUP_LABEL[o.group],o.noPart?'No':'Yes'].map(cell).join(','));
   });
-  const a=document.createElement('a');a.href=URL.createObjectURL(new Blob(['﻿'+lines.join('\r\n')],{type:'text/csv'}));a.download='late-at-risk-'+g+'-'+iso(today())+'.csv';document.body.appendChild(a);a.click();setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove()},500);
+  const a=document.createElement('a');a.href=URL.createObjectURL(new Blob(['﻿'+lines.join('\r\n')],{type:'text/csv'}));a.download=(g==='ship'?'can-ship-today-':g==='shipBookIn'?'can-ship-once-booked-in-':'late-at-risk-'+g+'-')+iso(today())+'.csv';document.body.appendChild(a);a.click();setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove()},500);
 }
 
 // ── Can jump the queue ──

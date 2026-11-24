@@ -21,6 +21,8 @@ orders left out.
   with no WO) and suppliers (container or supplier PO, Clockwork included).
   **Bought in – no PO raised** lists late or at-risk orders with a bought-in
   line that has nothing on order at all, for the office to raise the PO.
+  **Can ship in full today** (v2.12) lists the live orders the warehouse can
+  pick and send complete now, oldest promised date first.
 - **Can jump the queue** – orders that could go out in full by borrowing stock
   held for an order that cannot go out anyway. Shows the lender, what it is
   waiting on and whether the next delivery of the code backfills it in time.
@@ -119,6 +121,7 @@ orders, containers) and nothing else.
 
 ## Changelog
 
+- v2.12 (24 Nov 2026) – **Can ship in full today** tile (green, first on Late & at risk) and header count: live orders where every line still to go is in stock now (Sage allocation, free stock to the oldest promised date first, OH shelf stock). Sage only allocates at despatch, so the allocated column is not relied on. A second list shows orders that can go once completed works orders are booked in. Can't part ship customers are marked. Recalculated with every data paste; CSV export.
 - v2.11 (23 Nov 2026) – Late & at risk lists: the Waiting on column shows one line per item, "qty × code · WO / container / PO and date", like the production 10-day list. Overdue or missing cover shown in red.
 - v2.10 (18 Nov 2026) – Tibard codes bought from Oliver Harvey (Sage
   preferred supplier OLIVER, e.g. clogs) are covered by OH's shelf stock.
