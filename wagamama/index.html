@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Wagamama code switch</title>
+<!-- Changelog: 2026-11-25 v2.5 - reversed transfers: published history entries marked cleared/reversed clear on every PC and stay in the publish; seven 009XS689 transfers of 23 Nov reversed in data.json. -->
 <!-- Changelog: 2026-11-25 v2.4 - free-issue rule (styles 008/009, Settings): size swaps only from free-issue stock; otherwise 'Switch + transfer' moves the Sage line to the chargeable code in the ordered size (d.to) and the add-stock/pick list/switch list follow it. -->
 <!-- Changelog: 2026-11-24 v2.3 - search box (order number or product code) on Needs action and Can ship in full; Can ship in full sortable by Promised / Ordered. -->
 <!-- Changelog: 2026-11-23 v2.2 - Needs action chip 'Nothing in stock, no live PO': short lines without a same-size alternative and with no live PO on the ordered code (size up/down lines included). -->
@@ -250,7 +251,7 @@ input.find{border:1px solid var(--line);border-radius:6px;padding:8px 11px;font-
 
 <script>
 /* ============================ constants ============================ */
-const VER='2.4';
+const VER='2.5';
 const IS_EDITOR=/[?&]edit\b/.test(location.search);
 const SOP_DATA='../data.json';                 // Order tracker feed, same GitHub Pages origin
 const OWN_DATA='data.json';                    // optional published paste from wagamama_live.sql
@@ -583,7 +584,7 @@ function pubToken(){try{return localStorage.getItem(LS.tok)||localStorage.getIte
 function saveToken(){const t=document.getElementById('setToken').value.trim();if(!t)return;try{localStorage.setItem(LS.tok,t)}catch(e){}document.getElementById('pubMsg').textContent='Token kept on this PC.';renderData()}
 function publishData(){let raw='',ts='';try{raw=localStorage.getItem(LS.raw)||'';ts=localStorage.getItem(LS.ts)||''}catch(e){}
   if(!raw){alert('Nothing pasted on this PC yet. Paste today\'s data first (Data tab).');return}
-  const transfers={},history={};Object.entries(DEC).forEach(([k,d])=>{if(d.cleared)return;if(d.type==='transfer')transfers[k]=d;if(d.type==='transfer'||(d.type==='switch'&&d.done))history[k]=d});
+  const transfers={},history={};Object.entries(DEC).forEach(([k,d])=>{if(d.cleared){if(d.reversed)history[k]=d;return}if(d.type==='transfer')transfers[k]=d;if(d.type==='transfer'||(d.type==='switch'&&d.done))history[k]=d});
   const body=JSON.stringify({app:'wagamama',ver:VER,raw,ts,transfers,history,savedAt:new Date().toISOString()});const tok=pubToken();
   if(!tok){dl('data.json',body);alert('No publishing token on this PC: data.json downloaded. Upload it to SOPtracker/wagamama/ in GitHub, or add a token under Data & settings.');return}
   const headers={Authorization:'Bearer '+tok,Accept:'application/vnd.github+json'};const b=document.getElementById('pubDataBtn');b.disabled=true;
@@ -600,7 +601,8 @@ function fetchShared(){
   Promise.all([get(OWN_DATA),get(SOP_DATA)]).then(([own,sop])=>{
     FEED=sop&&sop.raw?parseRaw(sop.raw):null;
     // Published history (done switches + transfers) is merged into every PC: anything the repo holds that this browser lacks is restored.
-    const pubHist=own&&(own.history||own.transfers);if(pubHist){let added=0;Object.entries(pubHist).forEach(([k,d])=>{if(!DEC[k]){DEC[k]=d;added++}});if(added)lsSet(LS.dec,DEC)}
+    // A published entry marked cleared (reversed from the repo) also clears it on this PC, so a reversed transfer comes off every PC's lists.
+    const pubHist=own&&(own.history||own.transfers);if(pubHist){let added=0;Object.entries(pubHist).forEach(([k,d])=>{if(!DEC[k]){DEC[k]=d;added++}else if(d.cleared&&!DEC[k].cleared){DEC[k]=d;added++}});if(added)lsSet(LS.dec,DEC)}
     let localRaw='',localTs='';try{localRaw=localStorage.getItem(LS.raw)||'';localTs=localStorage.getItem(LS.ts)||''}catch(e){}
     if(IS_EDITOR&&localRaw){useData(parseRaw(localRaw),'your paste',localTs,'Pasted on this PC. "Forget paste" goes back to the tracker feed.');return}
     const cands=[];if(own&&own.raw)cands.push({d:parseRaw(own.raw),kind:'published Wagamama paste',ts:own.ts||own.savedAt||''});if(sop&&sop.raw)cands.push({d:parseRaw(sop.raw),kind:'Order tracker feed',ts:sop.ts||sop.savedAt||''});
