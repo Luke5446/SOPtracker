@@ -33,7 +33,7 @@ orders left out.
 ## Data
 
 1. **Sage** – `ordertracker_live.sql` (the POtracker query with every product
-   line on a live order, the comment lines on those orders, and the stock row
+   line on a live order, the comment and free text lines on those orders, and the stock row
    for each code in both companies plus its BULK item). The sales manager refreshes the Excel query, copies columns
    A to AD, opens the page with `?edit`, presses **Paste today's data** and
    then **Publish for team**. Everyone else opens the plain address.
@@ -121,6 +121,21 @@ orders, containers) and nothing else.
 
 ## Changelog
 
+- v2.13 (25 Nov 2026) – **Which lines get the logo.** `ordertracker_live.sql`
+  now returns the free text lines on each order (row type `TXT`, LineTypeID 1:
+  the web "personalisation ... logo" lines and typed embroidery / transfer
+  notes). The tracker ties each free text line, logo / text application
+  charge line and transfer line to the garment line(s) printed just before it
+  in Sage (by quantity; a charge typed above its garments is matched to the
+  lines that follow; logo origination is one-off and skipped). The order card
+  shows an **EMB** / **Transfer** pill and the instruction under each garment
+  that gets one. On the embroidery list the Embroidery / transfer column has
+  an EMB pill (orders whose embroidery is only on a free text line are now
+  listed too), and the Garments column lists the garments that get the logo or
+  transfer with whether they are in stock, then lines that are only short of
+  stock as **No EMB**. Until the new query is pasted the Garments column
+  works as before and says so. Settings and stored data unchanged; POtracker
+  skips the new row type.
 - v2.12 (24 Nov 2026) – **Can ship in full today** tile (green, first on Late & at risk) and header count: live orders where every line still to go is in stock now (Sage allocation, free stock to the oldest promised date first, OH shelf stock). Sage only allocates at despatch, so the allocated column is not relied on. A second list shows orders that can go once completed works orders are booked in. Can't part ship customers are marked. Recalculated with every data paste; CSV export.
 - v2.11 (23 Nov 2026) – Late & at risk lists: the Waiting on column shows one line per item, "qty × code · WO / container / PO and date", like the production 10-day list. Overdue or missing cover shown in red.
 - v2.10 (18 Nov 2026) – Tibard codes bought from Oliver Harvey (Sage
