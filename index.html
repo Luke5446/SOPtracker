@@ -329,7 +329,7 @@ textarea{width:100%;min-height:150px;font-size:11px;font-family:Consolas,monospa
    "Contested": a line only has stock because it is older than another order
    that will go short on the same code.
    ═══════════════════════════════════════════════════════════════════════ */
-const APP_VER='2.14';
+const APP_VER='2.15';
 const LS_RAW='ordertracker_raw', LS_TS='ordertracker_ts', LS_SET='ordertracker_settings', LS_DUE='ordertracker_wodue', LS_EMBX='ordertracker_embexp';
 const DEF_SET={
   made:['Tibard','Oliver Harvey','Clockwork','Clockwork Clothing','Clockwork Giant Clothing'],
@@ -621,7 +621,7 @@ function build(){
     // v2.5: completed works orders for the code, not yet in Sage (the planner's pipeline) – served after stock, oldest completed first
     const pipes=PP.pipe.filter(c=>baseCode(c.code)===base).map(c=>({c,left:c.qty})).sort((a,b)=>(a.c.completed||'').localeCompare(b.c.completed||''));let pi=0;
     // works orders carrying the code (special makes are for their own line)
-    const wos=[];PP.wos.forEach(w=>{if(w.sm)return;w.items.forEach(it=>{if(baseCode(it.code)===base)wos.push({w,left:it.qty})})});
+    const wos=[];PP.wos.forEach(w=>{if(w.sm)return;const tot=w.items.filter(it=>baseCode(it.code)===base).reduce((x,it)=>x+it.qty,0);w.items.forEach(it=>{if(baseCode(it.code)===base)wos.push({w,left:it.qty,tot})})});   // v2.15: tot = the WO's full quantity of this code, shown as "6 of 60 on WO-1857"
     wos.sort((a,b)=>(a.w.createdAt||'').localeCompare(b.w.createdAt||'')||a.w.i-b.w.i);
     // containers (stock planner), landing order
     const conts=SP.cPOs.map(c=>({c,left:c.items.filter(i=>baseCode(i.code)===base).reduce((x,i)=>x+i.qty,0)})).filter(c=>c.left>0);
@@ -646,7 +646,7 @@ function build(){
       (PP.smPipe.get(ln.pkey)||[]).forEach(c=>{if(need<=0)return;const q=Math.min(c.qty,need);need-=q;src.push({t:'pipe',qty:q,ref:c.ref,completed:c.completed,sm:true})});
       // a special make raised for this very line
       const sm=smWO.get(ln.pkey);
-      if(sm){ln.special=true;const q=Math.min(need,sm.items.reduce((x,i)=>x+i.qty,0)||need);need-=q;src.push({t:'wo',qty:q,ref:sm.ref,due:sm.due,sm:true,printed:sm.printed})}
+      if(sm){ln.special=true;const smTot=sm.items.reduce((x,i)=>x+i.qty,0);const q=Math.min(need,smTot||need);need-=q;src.push({t:'wo',qty:q,ref:sm.ref,due:sm.due,sm:true,printed:sm.printed,tot:smTot||q})}
       if(need>0&&!sm&&PP.smPending.has(ln.pkey)){ln.special=true;src.push({t:'smpend',qty:need,seen:(PP.smPending.get(ln.pkey)||{}).seenAt||''});need=0}
       // stock, oldest promised first
       if(need>0&&stock>0){const q=Math.min(stock,need);stock-=q;need-=q;src.push({t:'stock',qty:q});stockTakers.push(ln)}
@@ -657,7 +657,7 @@ function build(){
       // the back-to-back PO Sage generated from this order
       if(need>0&&ln.link){pos.filter(p=>soNo(p.src.doc)===ln.link&&p.left>0).forEach(p=>{if(need<=0)return;const q=Math.min(p.left,need);p.left-=q;need-=q;src.push({t:'po',qty:q,po:p,b2b:true})})}
       // works orders, oldest raised first
-      while(need>0&&wi<wos.length){const w=wos[wi];const q=Math.min(w.left,need);if(q>0){w.left-=q;need-=q;src.push({t:'wo',qty:q,ref:w.w.ref,due:w.w.due,printed:w.w.printed,embOnly:w.w.embOnly})}if(w.left<=0)wi++}
+      while(need>0&&wi<wos.length){const w=wos[wi];const q=Math.min(w.left,need);if(q>0){w.left-=q;need-=q;src.push({t:'wo',qty:q,ref:w.w.ref,due:w.w.due,printed:w.w.printed,embOnly:w.w.embOnly,tot:w.tot})}if(w.left<=0)wi++}
       // containers, landing order
       while(need>0&&ci<conts.length){const c=conts[ci];const q=Math.min(c.left,need);if(q>0){c.left-=q;need-=q;src.push({t:'cont',qty:q,ref:c.c.ref,date:c.c.date})}if(c.left<=0)ci++}
       // purchase orders, earliest date first
@@ -838,7 +838,7 @@ function srcChip(s,ln){
     case 'ohstock':return `<span class="src stock" title="Tibard buys this code from Oliver Harvey. The warehouse picks OH's stock and despatches it in Tibard; Sage raises the Tibard PO on OLIVER overnight, after the despatch."><b>${q}</b> OH stock <span class="d">· picked from OH shelf, Tibard PO raised after despatch</span></span>`;
     case 'mirror':return `<span class="src done">intercompany mirror – see the OH order</span>`;
     case 'pipe':return `<span class="src stock" title="Marked complete on the production planner; counts as stock until 7am the day after"><b>${q}</b> made${s.sm?' (special make)':''} – awaiting Sage book-in <span class="d">· ${esc(s.ref)} completed ${fd(pd(s.completed))}</span></span>`;
-    case 'wo':return `<span class="src wo"><b>${q}</b> on ${esc(s.ref)}${s.sm?' (special make)':''}${s.embOnly?' (EMB)':''} <span class="d">· due ${dueTxt(s.ref,s.due)}${s.overdue?' · <b>overdue</b>':''}${s.printed===false?' · not printed':''}</span>${dueBtn(s.ref)}</span>`;
+    case 'wo':return `<span class="src wo"><b>${q}</b>${s.tot?' of '+fmt(s.tot):''} on ${esc(s.ref)}${s.sm?' (special make)':''}${s.embOnly?' (EMB)':''} <span class="d">· due ${dueTxt(s.ref,s.due)}${s.overdue?' · <b>overdue</b>':''}${s.printed===false?' · not printed':''}</span>${dueBtn(s.ref)}</span>`;
     case 'smpend':return `<span class="src short"><b>${q}</b> special make – no works order yet${s.seen?' <span class="d">(seen '+fd(pd(s.seen))+')</span>':''}</span>`;
     case 'cont':return `<span class="src cont"><b>${q}</b> on ${esc(s.ref)} <span class="d">· lands ${fd(pd(s.date))}, out ${fd(s.when)}</span></span>`;
     case 'po':{const p=s.po.src;const who=p.ic?'Tibard (intercompany)':(p.acctName||p.acct||'supplier');
@@ -865,7 +865,7 @@ function orderExp(o){if(o.unknown)return '<span class="sm">unknown</span>';if(!o
 // one source of a line as "what it is waiting on" text (v2.13: shared by the Waiting on and Garments columns)
 function srcKey(s,l){
   let k='',bad=false;
-  if(s.t==='wo'){k=s.ref+(s.embOnly?' (EMB)':'')+' due '+(s.due?fd(pd(s.due)):'?')+(s.overdue?' – overdue':'');bad=!!s.overdue||!s.due}
+  if(s.t==='wo'){k=s.ref+(s.tot?' ('+fmt(s.tot)+' on WO)':'')+(s.embOnly?' (EMB)':'')+' due '+(s.due?fd(pd(s.due)):'?')+(s.overdue?' – overdue':'');bad=!!s.overdue||!s.due}
   else if(s.t==='cont'){const d=pd(s.date);k=s.ref+' lands '+fd(d)+(d&&d<today()?' – overdue':'');bad=!d||d<today()}
   else if(s.t==='po'){k=(s.po.src.ic?'via Tibard PO ':'PO ')+soNo(s.po.src.doc)+(s.po.src.ic?'':' '+(s.po.src.acctName||'')+' '+(s.po.date?fd(s.po.date)+(s.overdue?' – overdue':''):'no date'));bad=!!s.overdue||(!s.po.src.ic&&!s.po.date)}
   else if(s.t==='short'){k=l.made?'not on a works order':'no PO';bad=true}
@@ -1054,7 +1054,7 @@ function prodSummary(o,plain){
   o.prodLines.forEach(l=>l.sources.forEach(s=>{
     let k='';const x=s.t==='po'&&s.via?s.via.sources.filter(y=>prodSrc(y,s.via)):[s];
     x.forEach(y=>{
-      if(y.t==='wo')k=y.ref+(y.embOnly?' (EMB)':'')+' due '+(y.due?(plain?y.due:fd(pd(y.due))):'?')+(y.overdue?' – overdue':'');
+      if(y.t==='wo')k=y.ref+(y.tot?' ('+fmt(y.tot)+' on WO)':'')+(y.embOnly?' (EMB)':'')+' due '+(y.due?(plain?y.due:fd(pd(y.due))):'?')+(y.overdue?' – overdue':'');
       else if(y.t==='smpend')k='special make, no works order yet';
       else if(y.t==='short')k='not on a works order';
       else return;
