@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Wagamama code switch</title>
+<!-- Changelog: 2026-11-25 v2.6 - reversed transfers survive a new paste/publish (they were deleted with the day's cleared decisions, so the next publish dropped them). -->
 <!-- Changelog: 2026-11-25 v2.5 - reversed transfers: published history entries marked cleared/reversed clear on every PC and stay in the publish; seven 009XS689 transfers of 23 Nov reversed in data.json. -->
 <!-- Changelog: 2026-11-25 v2.4 - free-issue rule (styles 008/009, Settings): size swaps only from free-issue stock; otherwise 'Switch + transfer' moves the Sage line to the chargeable code in the ordered size (d.to) and the add-stock/pick list/switch list follow it. -->
 <!-- Changelog: 2026-11-24 v2.3 - search box (order number or product code) on Needs action and Can ship in full; Can ship in full sortable by Promised / Ordered. -->
@@ -251,7 +252,7 @@ input.find{border:1px solid var(--line);border-radius:6px;padding:8px 11px;font-
 
 <script>
 /* ============================ constants ============================ */
-const VER='2.5';
+const VER='2.6';
 const IS_EDITOR=/[?&]edit\b/.test(location.search);
 const SOP_DATA='../data.json';                 // Order tracker feed, same GitHub Pages origin
 const OWN_DATA='data.json';                    // optional published paste from wagamama_live.sql
@@ -576,7 +577,7 @@ let FEED=null; // Order tracker feed kept for the order summary when the Wagamam
 function useData(d,kind,ts,note){if(FEED&&(FEED.all||[]).length>(d.all||[]).length){d.all=FEED.all;d.stkAll=Object.assign({},FEED.stkAll,d.stkAll||{})}DATA=d;SRC={kind,ts,note};
   // Decisions belong to one day's data: a newer publish clears them (Sage then shows the switched codes).
   let had='';try{had=localStorage.getItem(LS.decTs)||''}catch(e){}
-  if(ts&&had!==ts){if(had){Object.keys(DEC).forEach(k=>{const d=DEC[k];if(d.cleared||d.type==='leave'||(d.type==='switch'&&!d.done))delete DEC[k]});lsSet(LS.dec,DEC)}try{localStorage.setItem(LS.decTs,ts)}catch(e){}}
+  if(ts&&had!==ts){if(had){Object.keys(DEC).forEach(k=>{const d=DEC[k];if((d.cleared&&!d.reversed)||d.type==='leave'||(d.type==='switch'&&!d.done))delete DEC[k]});lsSet(LS.dec,DEC)}try{localStorage.setItem(LS.decTs,ts)}catch(e){}}
   rebuild();renderData()}
 
 /* ---- publishing decisions ---- */
