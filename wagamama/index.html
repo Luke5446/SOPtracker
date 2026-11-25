@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Wagamama code switch</title>
+<!-- Changelog: 2026-11-25 v2.4 - free-issue rule (styles 008/009, Settings): size swaps only from free-issue stock; otherwise 'Switch + transfer' moves the Sage line to the chargeable code in the ordered size (d.to) and the add-stock/pick list/switch list follow it. -->
 <!-- Changelog: 2026-11-24 v2.3 - search box (order number or product code) on Needs action and Can ship in full; Can ship in full sortable by Promised / Ordered. -->
 <!-- Changelog: 2026-11-23 v2.2 - Needs action chip 'Nothing in stock, no live PO': short lines without a same-size alternative and with no live PO on the ordered code (size up/down lines included). -->
 <!-- Changelog: 2026-11-23 v2.1 - order summary and Can ship in full only count lines still to go (q3); fully despatched orders no longer listed; non T-shirt codes share physical stock oldest promised first, Sage allocation ignored (only set at despatch). -->
@@ -220,6 +221,7 @@ input.find{border:1px solid var(--line);border-radius:6px;padding:8px 11px;font-
 
   <div class="card edit-only"><h2>Settings</h2><div class="pad">
     <div class="field"><label>Current codes (IT's list, one per line). Anything ordered on a code not listed is flagged "old code"</label><textarea id="setActive" style="min-height:160px"></textarea></div>
+    <div class="field"><label>Free-issue styles (customer-owned stock, one per line). A short line on these may only size up/down from another free-issue code; if none, the line is switched to the chargeable code in the ordered size and stock transferred from the chargeable size up/down</label><textarea id="setFree" style="min-height:48px"></textarea></div>
     <div class="field"><label>Colour families: colour suffix = family name</label><textarea id="setColours"></textarea></div>
     <div class="field"><label>Sleeve by style when the description has no S/S or L/S: style = SS or LS</label><textarea id="setSleeve"></textarea></div>
     <div class="field"><label>Write-off Reference1 (max 20)</label><input id="setRefOff" maxlength="20"></div>
@@ -248,7 +250,7 @@ input.find{border:1px solid var(--line);border-radius:6px;padding:8px 11px;font-
 
 <script>
 /* ============================ constants ============================ */
-const VER='2.3';
+const VER='2.4';
 const IS_EDITOR=/[?&]edit\b/.test(location.search);
 const SOP_DATA='../data.json';                 // Order tracker feed, same GitHub Pages origin
 const OWN_DATA='data.json';                    // optional published paste from wagamama_live.sql
@@ -265,7 +267,8 @@ const DEFAULTS={
     'WAGTS0113XL689','WAGTS011LL689','WAGTS011MM689','WAGTS011SS689','WAGTS011XL689','WAGTS011XS689','WAGTS011XXL689','WAGTS008XS689','WAGTS008XXS689'],
   colours:{'03':'Black','689':'Green','884':'Green','153':'Green','721':'Green','351':'Grey','128':'Grey'},
   sleeve:{'008':'SS','011':'SS','11500':'SS','JT100':'SS','EP100':'SS','GD006':'SS','N15':'SS','N21':'SS','M93':'SS','M94':'SS','M68':'SS','009':'LS','012':'LS','02074':'LS','SX750':'LS','GD076':'LS','GD011':'LS'},
-  refOff:'Wag code swap', refAdd:'Wag swap', loc:'HOME'
+  refOff:'Wag code swap', refAdd:'Wag swap', loc:'HOME',
+  freeIssue:['008','009'] // Wagamama's own stock (free issue): a size swap must come from these styles, otherwise the line moves to a chargeable code
 };
 
 /* ============================ state ============================ */
@@ -325,7 +328,7 @@ function build(){
     // Available to share out = physical stock. Sage's allocation on these lines is rarely set, so the dashboard shares it itself.
     s.avail=s.inStock});
   // Transfers imported into Sage after this paste was taken are not in the stock figures yet: move the stock here so a second batch cannot write off the same units twice.
-  M_PEND={};pendingImports().forEach(d=>{(d.picks||[]).forEach(pk=>{if(stk[pk.code]){stk[pk.code].avail-=pk.qty;M_PEND[pk.code]=(M_PEND[pk.code]||0)+pk.qty}});if(stk[d.from])stk[d.from].avail+=(d.picks||[]).reduce((a,pk)=>a+pk.qty,0)});
+  M_PEND={};pendingImports().forEach(d=>{(d.picks||[]).forEach(pk=>{if(stk[pk.code]){stk[pk.code].avail-=pk.qty;M_PEND[pk.code]=(M_PEND[pk.code]||0)+pk.qty}});const dest=stk[d.to||d.from];if(dest)dest.avail+=(d.picks||[]).reduce((a,pk)=>a+pk.qty,0)});
   // SO lines still outstanding, oldest promised first
   const lines=DATA.so.filter(r=>r.q3>0).map(r=>{const s=stk[r.code];const d=DEC[r.key];return {r,s,p:s.p,need:r.q3,own:0,picks:[],short:0,dec:d&&!d.cleared?d:null,late:r.date&&r.date<todayISO()}});
   lines.sort((a,b)=>(a.r.date||'9')<(b.r.date||'9')?-1:(a.r.date||'9')>(b.r.date||'9')?1:(a.r.doc<b.r.doc?-1:a.r.doc>b.r.doc?1:a.r.seq-b.r.seq));
@@ -339,10 +342,21 @@ function build(){
   lines.forEach(l=>{if(l.short<=0||l.dec||!l.p)return;
     const fam=byFam[l.p.famKey]||[];const si=SIZES.indexOf(l.p.size);
     const rank=s=>{const d=Math.abs(SIZES.indexOf(s.p.size)-si);return d*10+(s.active?0:1)};
-    const cands=fam.filter(s=>s.code!==l.s.code&&s.avail>0&&Math.abs(SIZES.indexOf(s.p.size)-si)<=1)
+    const isFree=s=>(SET.freeIssue||[]).includes(s.p.style);
+    let cands=fam.filter(s=>s.code!==l.s.code&&s.avail>0&&Math.abs(SIZES.indexOf(s.p.size)-si)<=1)
       .sort((a,b)=>rank(a)-rank(b)||b.avail-a.avail);
-    for(const s of cands){if(l.short<=0)break;const t=take(s.code,l.short);if(t>0){l.picks.push({code:s.code,qty:t,taken:t,sizeDiff:SIZES.indexOf(s.p.size)-si});l.short-=t}}
-    l.cands=cands.map(s=>s.code);
+    if(isFree(l.s)){
+      // Free-issue line: size swaps only from free-issue stock; a chargeable code in the same size is a plain Sage switch;
+      // a chargeable size up/down means switch the line to the chargeable code in the ordered size and transfer into it.
+      const freeC=cands.filter(isFree), chargeSame=cands.filter(s=>!isFree(s)&&s.p.size===l.p.size), chargeStep=cands.filter(s=>!isFree(s)&&s.p.size!==l.p.size);
+      cands=freeC.concat(chargeSame);
+      for(const s of cands){if(l.short<=0)break;const t=take(s.code,l.short);if(t>0){l.picks.push({code:s.code,qty:t,taken:t,sizeDiff:SIZES.indexOf(s.p.size)-si});l.short-=t}}
+      for(const s of chargeStep){if(l.short<=0)break;const t=take(s.code,l.short);if(t>0){l.picks.push({code:s.code,qty:t,taken:t,sizeDiff:SIZES.indexOf(s.p.size)-si,to:chargeTarget(l,s,stk,fam)});l.short-=t}}
+      l.cands=cands.concat(chargeStep).map(s=>s.code);
+    }else{
+      for(const s of cands){if(l.short<=0)break;const t=take(s.code,l.short);if(t>0){l.picks.push({code:s.code,qty:t,taken:t,sizeDiff:SIZES.indexOf(s.p.size)-si});l.short-=t}}
+      l.cands=cands.map(s=>s.code);
+    }
   });
   lines.forEach(l=>{l.short=Math.max(0,l.short);l.kind=l.short<=0&&l.picks.length===0?'ok':l.picks.length&&l.picks.every(p=>!p.sizeDiff)?'alt':l.picks.length?'size':'none';
     if(l.need>l.own&&l.short>0&&l.picks.length)l.kind='part';l.oldCode=!l.s.active});
@@ -368,6 +382,10 @@ function renderShip(){const q=(document.getElementById('shipFind').value||'').tr
   const rows=M.shipFull.filter(o=>!q||soNo(o.doc).includes(q)||(o.codes||[]).some(c=>c.toLowerCase().includes(q)))
     .sort((a,b)=>{const x=a[SHIP.by]||'9',y=b[SHIP.by]||'9';return (x<y?-1:x>y?1:0)*(SHIP.asc?1:-1)});
   document.querySelector('#shipTable tbody').innerHTML=rows.length?rows.map(o=>'<tr><td><b>'+esc(soNo(o.doc))+'</b>'+(o.hold?' <span class="badge amber">On hold</span>':'')+'</td><td>'+esc(o.cust)+'<div class="desc">'+esc(o.ref)+'</div></td><td class="'+(o.date&&o.date<todayISO()?'late':'')+'">'+ukDate(o.date)+'</td><td>'+ukDate(o.ordered)+'</td><td class="num">'+o.lines+'</td></tr>').join(''):'<tr><td colspan="5" class="empty">'+(M.shipFull.length?'No order matches.':'No order can ship in full on this data.')+'</td></tr>'}
+// Chargeable code in the ordered size for a free-issue line: same style as the stock being used if Sage has it, else an active chargeable code of that size in the family, else the constructed code (not yet in Sage).
+const SIZE_SUFFIX={XXS:'XXS',XS:'XS',S:'SS',M:'MM',L:'LL',XL:'XL',XXL:'XXL','3XL':'3XL'};
+function chargeTarget(l,s,stk,fam){const want='WAGTS'+s.p.style+(SIZE_SUFFIX[l.p.size]||l.p.size)+s.p.col;if(stk[want])return want;
+  const alt=fam.filter(x=>x.p.size===l.p.size&&!(SET.freeIssue||[]).includes(x.p.style)).sort((a,b)=>(b.active?1:0)-(a.active?1:0)||b.avail-a.avail)[0];return alt?alt.code:want}
 function orderSummary(doc){const o=M.orders&&M.orders[doc];if(!o)return '';const part=o.ready>0&&o.short>0;
   return '<span class="osum">'+o.lines+' line'+(o.lines===1?'':'s')+': <span class="badge green">'+o.ready+' in stock</span> <span class="badge '+(o.short?'red':'')+'">'+o.short+' short</span>'+(o.prod?' <span class="badge amber">'+o.prod+' in production</span>':'')+(part?' <span class="badge blue">part ship?</span>':'')+'</span>'}
 
@@ -417,21 +435,21 @@ function renderAction(){
 }
 function coverCell(l){
   let h='';
-  if(l.dec){const d=l.dec;h+='<span class="badge '+(d.type==='switch'?'gold':d.type==='transfer'?'green':'')+'">'+(d.type==='switch'?'Switch in Sage':d.type==='transfer'?'Stock transfer':'Leave as is')+(d.done?' · done':d.imported?' · imported':'')+'</span> ';
+  if(l.dec){const d=l.dec;h+='<span class="badge '+(d.type==='switch'?'gold':d.type==='transfer'?'green':'')+'">'+(d.type==='switch'?'Switch in Sage':d.type==='transfer'?(d.to?'Switch to '+esc(d.to)+' + transfer':'Stock transfer'):'Leave as is')+(d.done?' · Sage done':'')+(d.imported?' · imported':'')+'</span> ';
     (d.picks||[]).forEach(p=>{h+='<span class="pick alt"><span class="code">'+esc(p.code)+'</span> × '+p.qty+'</span>'});if(d.note)h+='<div class="desc">'+esc(d.note)+'</div>';return h}
-  l.picks.forEach(p=>{const s=M.stk[p.code];h+='<span class="pick alt" title="'+esc(s?s.desc:'')+'"><span class="code">'+esc(p.code)+'</span> × '+p.qty+(p.sizeDiff?' <span class="badge amber">'+(p.sizeDiff>0?'size up':'size down')+' ('+(s&&s.p?s.p.size:'')+')</span>':' <span class="badge green">same size</span>')+(s&&!s.active?' <span class="badge amber">old</span>':'')+'</span>'});
+  l.picks.forEach(p=>{const s=M.stk[p.code];h+='<span class="pick alt" title="'+esc(s?s.desc:'')+'"><span class="code">'+esc(p.code)+'</span> × '+p.qty+(p.sizeDiff?' <span class="badge amber">'+(p.sizeDiff>0?'size up':'size down')+' ('+(s&&s.p?s.p.size:'')+')</span>':' <span class="badge green">same size</span>')+(s&&!s.active?' <span class="badge amber">old</span>':'')+(p.to?'<div class="desc">free-issue line: switch Sage line to <span class="code">'+esc(p.to)+'</span>'+(M.stk[p.to]?'':' <span class="badge red">not in Sage</span>')+' and transfer into it</div>':'')+'</span>'});
   if(l.short>0){const s=l.s;h+='<span class="pick none">'+l.short+' not in stock'+(s.poOut?' · '+s.poOut+' on PO'+(s.poFirst?' due '+ukDate(s.poFirst):''):'')+'</span>'}
   return h;
 }
 function actionBtns(l){if(l.dec)return '<button class="btn btn-o btn-sm" onclick="undoDecision(\''+esc(l.r.key)+'\')">Undo</button>';
-  const can=l.picks.length>0;
-  return (can?'<button class="btn btn-p btn-sm" onclick="decide(\''+esc(l.r.key)+'\',\'switch\')" title="Amend the order line in Sage to the suggested code">Switch in Sage</button><button class="btn btn-g btn-sm edit-only" onclick="decide(\''+esc(l.r.key)+'\',\'transfer\')" title="Move the garments onto the ordered code with a write-off and add-stock file">Transfer stock</button>':'')+
+  const can=l.picks.length>0, combo=l.picks.some(p=>p.to);
+  return (combo?'<button class="btn btn-g btn-sm edit-only" onclick="decide(\''+esc(l.r.key)+'\',\'transfer\')" title="Amend the Sage line to the chargeable code in the ordered size, then write off the size up/down and add stock to that code">Switch + transfer</button>':can?'<button class="btn btn-p btn-sm" onclick="decide(\''+esc(l.r.key)+'\',\'switch\')" title="Amend the order line in Sage to the suggested code">Switch in Sage</button><button class="btn btn-g btn-sm edit-only" onclick="decide(\''+esc(l.r.key)+'\',\'transfer\')" title="Move the garments onto the ordered code with a write-off and add-stock file">Transfer stock</button>':'')+
     '<button class="btn btn-o btn-sm" onclick="decide(\''+esc(l.r.key)+'\',\'pick\')" title="Choose a different code or quantity">Choose…</button><button class="btn btn-o btn-sm" onclick="decide(\''+esc(l.r.key)+'\',\'leave\')">Leave</button>';
 }
 
 /* ---- decisions ---- */
 function lineByKey(k){return M.lines.find(l=>l.r.key===k)}
-function decide(key,type){const l=lineByKey(key);if(!l)return;let picks=l.picks.map(p=>({code:p.code,qty:p.qty}));
+function decide(key,type){const l=lineByKey(key);if(!l)return;let picks=l.picks.map(p=>({code:p.code,qty:p.qty,to:p.to}));
   if(type==='pick'){
     const fam=(M.byFam[l.p?l.p.famKey:'']||[]).filter(s=>s.code!==l.s.code).sort((a,b)=>b.avail-a.avail);
     const list=fam.map((s,i)=>(i+1)+') '+s.code+' size '+s.p.size+' – '+s.avail+' free'+(s.active?'':' (old)')).join('\n');
@@ -442,7 +460,9 @@ function decide(key,type){const l=lineByKey(key);if(!l)return;let picks=l.picks.
     type=IS_EDITOR&&!confirm('OK = Switch in Sage (amend the order to '+pickS.code+').\nCancel = Transfer stock (write off '+pickS.code+', add stock to '+l.s.code+').')?'transfer':'switch';
   }
   if(type==='leave')picks=[];
-  DEC[key]={type,picks,when:new Date().toISOString(),doc:l.r.doc,seq:l.r.seq,cust:l.r.cust,from:l.s.code,need:l.need,promised:l.r.date||''};
+  const to=type==='transfer'?(picks.find(p=>p.to)||{}).to:undefined;picks=picks.map(p=>({code:p.code,qty:p.qty}));
+  if(type==='switch'&&l.picks.some(p=>p.to)){alert('This is a free-issue line with no free-issue stock: use Switch + transfer (editor) so the line moves to the chargeable code.');return}
+  DEC[key]={type,picks,when:new Date().toISOString(),doc:l.r.doc,seq:l.r.seq,cust:l.r.cust,from:l.s.code,need:l.need,promised:l.r.date||''};if(to)DEC[key].to=to;
   saveDecisions();rebuild();
 }
 function undoDecision(key){DEC[key]={cleared:true,when:new Date().toISOString()};saveDecisions();rebuild()}
@@ -450,31 +470,33 @@ function saveDecisions(){lsSet(LS.dec,DEC)}
 function rebuild(){build();render()}
 
 function promisedOf(k,d){if(d.promised)return d.promised;const l=M.lines.find(x=>x.r.key===k);return l?l.r.date:''}
-function renderSwitch(){const all=Object.entries(DEC).filter(([k,d])=>d.type==='switch'&&!d.cleared);
+const needsSage=d=>d.type==='switch'||(d.type==='transfer'&&d.to);
+const newCodes=d=>d.to?[{code:d.to,qty:(d.picks||[]).reduce((a,p)=>a+p.qty,0)}]:(d.picks||[]);
+function renderSwitch(){const all=Object.entries(DEC).filter(([k,d])=>needsSage(d)&&!d.cleared);
   const rows=all.filter(([k,d])=>!d.done).sort((a,b)=>a[1].doc<b[1].doc?-1:1), hist=all.filter(([k,d])=>d.done).sort((a,b)=>a[1].done<b[1].done?1:-1);
   document.getElementById('swCount').textContent=rows.length+' to do';document.getElementById('swHistCount').textContent=hist.length+' line'+(hist.length===1?'':'s');
-  document.querySelector('#swHist tbody').innerHTML=hist.length?hist.map(([k,d])=>'<tr><td class="desc">'+fmtTs(d.done)+'</td><td><b>'+esc(soNo(d.doc))+'</b> line '+d.seq+'</td><td>'+ukDate(promisedOf(k,d))+'</td><td><span class="code">'+esc(d.from)+'</span></td><td>'+(d.picks||[]).map(p=>'<span class="code">'+esc(p.code)+'</span>').join('<br>')+'</td><td class="num">'+(d.picks||[]).map(p=>p.qty).join('<br>')+'</td><td class="acts edit-only"><button class="btn btn-o btn-sm" onclick="undoDecision(\''+esc(k)+'\')">Undo</button></td></tr>').join(''):'<tr><td colspan="7" class="empty">Nothing changed in Sage yet.</td></tr>';
+  document.querySelector('#swHist tbody').innerHTML=hist.length?hist.map(([k,d])=>'<tr><td class="desc">'+fmtTs(d.done)+'</td><td><b>'+esc(soNo(d.doc))+'</b> line '+d.seq+'</td><td>'+ukDate(promisedOf(k,d))+'</td><td><span class="code">'+esc(d.from)+'</span></td><td>'+newCodes(d).map(p=>'<span class="code">'+esc(p.code)+'</span>').join('<br>')+(d.to?'<div class="desc">+ transfer</div>':'')+'</td><td class="num">'+newCodes(d).map(p=>p.qty).join('<br>')+'</td><td class="acts edit-only"><button class="btn btn-o btn-sm" onclick="undoDecision(\''+esc(k)+'\')">Undo</button></td></tr>').join(''):'<tr><td colspan="7" class="empty">Nothing changed in Sage yet.</td></tr>';
   const tb=document.querySelector('#swTable tbody');if(!rows.length){tb.innerHTML='<tr><td colspan="8" class="empty">No switches waiting.</td></tr>';return}
-  tb.innerHTML=rows.map(([k,d])=>'<tr class="'+(d.done?'done':'')+'"><td><b>'+esc(soNo(d.doc))+'</b></td><td>'+esc(d.cust)+'</td><td>'+d.seq+'</td><td><span class="code">'+esc(d.from)+'</span></td><td>'+(d.picks||[]).map(p=>'<span class="code">'+esc(p.code)+'</span>').join('<br>')+'</td><td class="num">'+(d.picks||[]).map(p=>p.qty).join('<br>')+'</td><td class="desc">'+fmtTs(d.when)+(d.done?'<br>done '+fmtTs(d.done):'')+'</td><td class="acts">'+(d.done?'':'<button class="btn btn-g btn-sm" onclick="markDone(\''+esc(k)+'\')">✓ Changed in Sage</button>')+'<button class="btn btn-o btn-sm" onclick="undoDecision(\''+esc(k)+'\')">Undo</button></td></tr>').join('');
+  tb.innerHTML=rows.map(([k,d])=>'<tr class="'+(d.done?'done':'')+'"><td><b>'+esc(soNo(d.doc))+'</b></td><td>'+esc(d.cust)+'</td><td>'+d.seq+'</td><td><span class="code">'+esc(d.from)+'</span></td><td>'+newCodes(d).map(p=>'<span class="code">'+esc(p.code)+'</span>').join('<br>')+(d.to?'<div class="desc">then transfer '+(d.picks||[]).map(p=>p.code+' ×'+p.qty).join(', ')+' into it</div>':'')+'</td><td class="num">'+newCodes(d).map(p=>p.qty).join('<br>')+'</td><td class="desc">'+fmtTs(d.when)+(d.done?'<br>done '+fmtTs(d.done):'')+'</td><td class="acts">'+(d.done?'':'<button class="btn btn-g btn-sm" onclick="markDone(\''+esc(k)+'\')">✓ Changed in Sage</button>')+'<button class="btn btn-o btn-sm" onclick="undoDecision(\''+esc(k)+'\')">Undo</button></td></tr>').join('');
 }
 function markDone(k){if(DEC[k]){DEC[k].done=new Date().toISOString();saveDecisions();rebuild()}}
 function xlsxOk(){if(typeof XLSX==='undefined'){alert('The Excel library did not load (no internet to cdnjs). Reload the page and try again.');return false}return true}
 function exportSwitchList(){if(!xlsxOk())return;
-  const all=Object.entries(DEC).filter(([k,d])=>d.type==='switch'&&!d.cleared);if(!all.length){alert('No switches decided yet.');return}
+  const all=Object.entries(DEC).filter(([k,d])=>needsSage(d)&&!d.cleared);if(!all.length){alert('No switches decided yet.');return}
   const data=[['Order','Promised','Old code','New code','Qty','Decided','Changed in Sage']];
-  all.sort((a,b)=>(a[1].done?1:0)-(b[1].done?1:0)||(a[1].doc<b[1].doc?-1:1)).forEach(([k,d])=>(d.picks||[]).forEach(p=>data.push([soNo(d.doc),ukDate(promisedOf(k,d)),d.from,p.code,p.qty,ukDate((d.when||'').slice(0,10)),d.done?ukDate(d.done.slice(0,10)):''])));
+  all.sort((a,b)=>(a[1].done?1:0)-(b[1].done?1:0)||(a[1].doc<b[1].doc?-1:1)).forEach(([k,d])=>newCodes(d).forEach(p=>data.push([soNo(d.doc),ukDate(promisedOf(k,d)),d.from,p.code,p.qty,ukDate((d.when||'').slice(0,10)),d.done?ukDate(d.done.slice(0,10)):''])));
   const ws=XLSX.utils.aoa_to_sheet(data);ws['!cols']=[8,11,18,18,5,11,15].map(w=>({wch:w}));ws['!autofilter']={ref:XLSX.utils.encode_range({s:{r:0,c:0},e:{r:data.length-1,c:6}})};
   const wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,ws,'Sage switches');XLSX.writeFile(wb,'Wagamama_switch_list_'+todayISO()+'.xlsx');
 }
-function copySwitchList(){const rows=Object.values(DEC).filter(d=>d.type==='switch'&&!d.cleared&&!d.done);const t=rows.map(d=>'SO '+soNo(d.doc)+' line '+d.seq+': '+d.from+' -> '+(d.picks||[]).map(p=>p.code+' x'+p.qty).join(', ')).join('\n');navigator.clipboard&&navigator.clipboard.writeText(t).then(()=>alert('Copied '+rows.length+' lines.'),()=>prompt('Copy:',t))}
+function copySwitchList(){const rows=Object.values(DEC).filter(d=>needsSage(d)&&!d.cleared&&!d.done);const t=rows.map(d=>'SO '+soNo(d.doc)+' line '+d.seq+': '+d.from+' -> '+newCodes(d).map(p=>p.code+' x'+p.qty).join(', ')).join('\n');navigator.clipboard&&navigator.clipboard.writeText(t).then(()=>alert('Copied '+rows.length+' lines.'),()=>prompt('Copy:',t))}
 
 function renderTransfer(){const all=Object.entries(DEC).filter(([k,d])=>d.type==='transfer'&&!d.cleared);
   const todo=all.filter(([k,d])=>!d.imported), hist=all.filter(([k,d])=>d.imported).sort((a,b)=>a[1].imported<b[1].imported?1:-1);
   const pend=pendingImports(),stale=document.getElementById('trStale');if(pend.length){stale.style.display='block';stale.innerHTML='<b>Sage data is older than your last import</b> ('+pend.length+' imported line'+(pend.length===1?'':'s')+' not in it yet). The stock they moved is already deducted here, but paste fresh data before the next batch to be safe.'}else stale.style.display='none';
   document.getElementById('trCount').textContent=todo.length+' line'+(todo.length===1?'':'s');document.getElementById('trHistCount').textContent=hist.length+' line'+(hist.length===1?'':'s');
   const tb=document.querySelector('#trTable tbody');
-  tb.innerHTML=todo.length?todo.map(([k,d])=>'<tr><td><b>'+esc(soNo(d.doc))+'</b> line '+d.seq+'</td><td>'+esc(d.cust)+'</td><td>'+(d.picks||[]).map(p=>'<span class="code">'+esc(p.code)+'</span>').join('<br>')+'</td><td><span class="code">'+esc(d.from)+'</span></td><td class="num">'+(d.picks||[]).map(p=>p.qty).join('<br>')+'</td><td class="desc">'+fmtTs(d.when)+'</td><td class="acts"><button class="btn btn-o btn-sm" onclick="undoDecision(\''+esc(k)+'\')">Undo</button></td></tr>').join(''):'<tr><td colspan="7" class="empty">Nothing waiting to import.</td></tr>';
-  document.querySelector('#trHist tbody').innerHTML=hist.length?hist.map(([k,d])=>'<tr><td class="desc">'+fmtTs(d.imported)+'</td><td>'+esc(soNo(d.doc))+' line '+d.seq+'</td><td>'+ukDate(promisedOf(k,d))+'</td><td>'+(d.picks||[]).map(p=>'<span class="code">'+esc(p.code)+'</span>').join('<br>')+'</td><td><span class="code">'+esc(d.from)+'</span></td><td class="num">'+(d.picks||[]).map(p=>p.qty).join('<br>')+'</td><td class="acts edit-only"><button class="btn btn-o btn-sm" onclick="undoDecision(\''+esc(k)+'\')">Undo</button></td></tr>').join(''):'<tr><td colspan="7" class="empty">No batches imported yet.</td></tr>';
+  tb.innerHTML=todo.length?todo.map(([k,d])=>'<tr><td><b>'+esc(soNo(d.doc))+'</b> line '+d.seq+'</td><td>'+esc(d.cust)+'</td><td>'+(d.picks||[]).map(p=>'<span class="code">'+esc(p.code)+'</span>').join('<br>')+'</td><td><span class="code">'+esc(d.to||d.from)+'</span>'+(d.to?'<div class="desc">line switched from '+esc(d.from)+(d.done?'':' – Sage change still to tick')+'</div>':'')+'</td><td class="num">'+(d.picks||[]).map(p=>p.qty).join('<br>')+'</td><td class="desc">'+fmtTs(d.when)+'</td><td class="acts"><button class="btn btn-o btn-sm" onclick="undoDecision(\''+esc(k)+'\')">Undo</button></td></tr>').join(''):'<tr><td colspan="7" class="empty">Nothing waiting to import.</td></tr>';
+  document.querySelector('#trHist tbody').innerHTML=hist.length?hist.map(([k,d])=>'<tr><td class="desc">'+fmtTs(d.imported)+'</td><td>'+esc(soNo(d.doc))+' line '+d.seq+'</td><td>'+ukDate(promisedOf(k,d))+'</td><td>'+(d.picks||[]).map(p=>'<span class="code">'+esc(p.code)+'</span>').join('<br>')+'</td><td><span class="code">'+esc(d.to||d.from)+'</span>'+(d.to?'<div class="desc">line switched from '+esc(d.from)+'</div>':'')+'</td><td class="num">'+(d.picks||[]).map(p=>p.qty).join('<br>')+'</td><td class="acts edit-only"><button class="btn btn-o btn-sm" onclick="undoDecision(\''+esc(k)+'\')">Undo</button></td></tr>').join(''):'<tr><td colspan="7" class="empty">No batches imported yet.</td></tr>';
 }
 function transferRows(){return Object.values(DEC).filter(d=>d.type==='transfer'&&!d.cleared&&!d.imported)}
 // Imported transfers the current paste cannot yet show (imported after the paste, with a 15 min margin for the SQL run time).
@@ -491,14 +513,14 @@ function exportTransfers(which){const todo=transferRows();if(!todo.length){alert
     todo.forEach(d=>(d.picks||[]).forEach(p=>rows.push([p.code,SET.loc,'',Math.round(p.qty),sageRef(SET.refOff),sageRef(soNo(d.doc)),date,'Manual Reduction'])));
     dl('Wagamama_WriteOff_'+stamp+'.csv',csv(rows))}
   else{rows=[['StockCode','Location','Bin','Qty','StockExported','Reference1']];
-    todo.forEach(d=>{const q=(d.picks||[]).reduce((a,p)=>a+Math.round(p.qty),0);rows.push([d.from,SET.loc,'',q,'',sageRef(SET.refAdd+' '+soNo(d.doc),soNo(d.doc))])});
+    todo.forEach(d=>{const q=(d.picks||[]).reduce((a,p)=>a+Math.round(p.qty),0);rows.push([d.to||d.from,SET.loc,'',q,'',sageRef(SET.refAdd+' '+soNo(d.doc),soNo(d.doc))])});
     dl('Wagamama_AddStock_'+stamp+'.csv',csv(rows))}
 }
 function exportPickList(){if(!xlsxOk())return;
   const all=Object.entries(DEC).filter(([k,d])=>d.type==='transfer'&&!d.cleared);if(!all.length){alert('No stock transfers recorded yet.');return}
   const info=c=>{const st=M.stk[c];const p=(st&&st.p)||parseCode(c,st&&st.desc);return {desc:st?st.desc:'',size:p?p.size:''}};
   const data=[['Order','Promised','Code on pick list','Pick from code','Pick from size','Pick from description','Qty','Decided','Imported to Sage']];
-  all.sort((a,b)=>(a[1].imported?1:0)-(b[1].imported?1:0)||(a[1].doc<b[1].doc?-1:1)).forEach(([k,d])=>(d.picks||[]).forEach(p=>{const to=info(p.code);data.push([soNo(d.doc),ukDate(promisedOf(k,d)),d.from,p.code,to.size,to.desc,p.qty,ukDate((d.when||'').slice(0,10)),d.imported?ukDate(d.imported.slice(0,10)):''])}));
+  all.sort((a,b)=>(a[1].imported?1:0)-(b[1].imported?1:0)||(a[1].doc<b[1].doc?-1:1)).forEach(([k,d])=>(d.picks||[]).forEach(p=>{const to=info(p.code);data.push([soNo(d.doc),ukDate(promisedOf(k,d)),d.to||d.from,p.code,to.size,to.desc,p.qty,ukDate((d.when||'').slice(0,10)),d.imported?ukDate(d.imported.slice(0,10)):''])}));
   const ws=XLSX.utils.aoa_to_sheet(data);ws['!cols']=[8,11,18,18,8,52,5,11,15].map(w=>({wch:w}));ws['!autofilter']={ref:XLSX.utils.encode_range({s:{r:0,c:0},e:{r:data.length-1,c:8}})};
   const wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,ws,'Wagamama transfers');XLSX.writeFile(wb,'Wagamama_pick_list_'+todayISO()+'.xlsx');
 }
@@ -533,14 +555,14 @@ function renderData(){
     '<b>Now showing:</b> '+(SRC.kind?esc(SRC.kind)+' from '+esc(fmtTs(SRC.ts)):'nothing loaded')+(SRC.note?'<div class="desc">'+esc(SRC.note)+'</div>':'')+
     '<div class="desc" style="margin-top:6px">Published Wagamama paste = wagamama_live.sql pasted and published from the editor PC (preferred). Order tracker feed = the daily ordertracker_live.sql paste in SOPtracker/data.json, used when it is newer or nothing has been published (every WAGTS stock item only from tracker SQL v2.9). '+
     'Lines: '+M.lines.length+' open · stock codes: '+Object.keys(M.stk).length+' · PO lines: '+DATA.po.length+'.</div></div>';
-  document.getElementById('setActive').value=SET.active.join('\n');
+  document.getElementById('setActive').value=SET.active.join('\n');document.getElementById('setFree').value=(SET.freeIssue||[]).join('\n');
   document.getElementById('setColours').value=Object.entries(SET.colours).map(([k,v])=>k+' = '+v).join('\n');
   document.getElementById('setSleeve').value=Object.entries(SET.sleeve).map(([k,v])=>k+' = '+v).join('\n');
   document.getElementById('setRefOff').value=SET.refOff;document.getElementById('setRefAdd').value=SET.refAdd;document.getElementById('setLoc').value=SET.loc;
   document.getElementById('setToken').value='';document.getElementById('setToken').placeholder=pubToken()?'(kept on this PC)':'paste a GitHub token';
 }
 function kv(text){const o={};text.split(/\r?\n/).forEach(l=>{const m=/^\s*([^=]+?)\s*=\s*(.+?)\s*$/.exec(l);if(m)o[m[1]]=m[2]});return o}
-function saveSettings(){SET.active=document.getElementById('setActive').value.split(/\r?\n/).map(s=>s.trim().toUpperCase()).filter(Boolean);
+function saveSettings(){SET.active=document.getElementById('setActive').value.split(/\r?\n/).map(s=>s.trim().toUpperCase()).filter(Boolean);SET.freeIssue=document.getElementById('setFree').value.split(/\r?\n/).map(s=>s.trim().toUpperCase()).filter(Boolean);
   SET.colours=kv(document.getElementById('setColours').value);SET.sleeve=kv(document.getElementById('setSleeve').value.toUpperCase());
   SET.refOff=document.getElementById('setRefOff').value.trim()||DEFAULTS.refOff;SET.refAdd=document.getElementById('setRefAdd').value.trim()||DEFAULTS.refAdd;SET.loc=document.getElementById('setLoc').value.trim()||DEFAULTS.loc;
   lsSet(LS.set,SET);rebuild();renderData();alert('Settings saved on this PC.')}
