@@ -121,6 +121,12 @@ orders, containers) and nothing else.
 
 ## Changelog
 
+- v2.15 (25 Nov 2026) – **Full works order quantity on the line.** The WO
+  pill now reads "6 of 60 on WO-1857 · due 27 Nov" instead of "6 on WO-1857",
+  so sales can see the whole WO without opening the pencil. The same figure
+  appears as "WO-1857 (60 on WO) due 27 Nov" in the Waiting on / Garments
+  columns of the lists and the production list. The quantity is the WO's total
+  of that stock code (all sizes); a special make shows its own total.
 - v2.14 (25 Nov 2026) – **Planner feeds kept fresh.** The works orders
   (production planner) and containers (stock planner) were only read when the
   page opened, so a tab left open all day showed a line as "needs a works
