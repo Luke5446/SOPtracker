@@ -121,6 +121,14 @@ orders, containers) and nothing else.
 
 ## Changelog
 
+- v2.14 (25 Nov 2026) – **Planner feeds kept fresh.** The works orders
+  (production planner) and containers (stock planner) were only read when the
+  page opened, so a tab left open all day showed a line as "needs a works
+  order" after a WO had been raised for it (OHAP3005248L on SO 876066, covered
+  by WO-2024). The tracker now re-reads both feeds after every data paste,
+  when the tab comes back into view (if the last read is over 5 minutes old)
+  and every 15 minutes while it is in view. The WO/container matching itself
+  was right.
 - v2.13 (25 Nov 2026) – **Which lines get the logo.** `ordertracker_live.sql`
   now returns the free text lines on each order (row type `TXT`, LineTypeID 1:
   the web "personalisation ... logo" lines and typed embroidery / transfer
