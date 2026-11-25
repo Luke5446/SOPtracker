@@ -80,7 +80,8 @@ td .sm,.sm{font-size:11.5px;color:var(--mut)}
 .pill{display:inline-block;font-size:11px;font-weight:600;padding:2px 8px;border-radius:12px;white-space:nowrap}
 .p-red{background:var(--red-bg);color:#b91c1c} .p-amber{background:var(--amber-bg);color:#92400e}
 .p-green{background:var(--green-bg);color:#065f46} .p-blue{background:var(--blue-bg);color:#1e40af}
-.p-grey{background:var(--grey-bg);color:#4b5563} .p-gold{background:#f6ecd2;color:#7a5a12}
+.p-grey{background:var(--grey-bg);color:#4b5563} .p-gold{background:#f6ecd2;color:#7a5a12} .p-purple{background:#ede9fe;color:#5b21b6}
+.embtxt{font-size:11.5px;color:#5b21b6;margin-top:2px;white-space:pre-wrap}
 .co{display:inline-block;font-size:10.5px;font-weight:700;padding:1px 6px;border-radius:4px;letter-spacing:.3px}
 .co-t{background:#e4eaf6;color:var(--navy)} .co-o{background:#f3ead6;color:#7a5a12}
 .empty{padding:34px 16px;text-align:center;color:var(--mut);font-size:13.5px}
@@ -328,7 +329,7 @@ textarea{width:100%;min-height:150px;font-size:11px;font-family:Consolas,monospa
    "Contested": a line only has stock because it is older than another order
    that will go short on the same code.
    ═══════════════════════════════════════════════════════════════════════ */
-const APP_VER='2.12';
+const APP_VER='2.13';
 const LS_RAW='ordertracker_raw', LS_TS='ordertracker_ts', LS_SET='ordertracker_settings', LS_DUE='ordertracker_wodue', LS_EMBX='ordertracker_embexp';
 const DEF_SET={
   made:['Tibard','Oliver Harvey','Clockwork','Clockwork Clothing','Clockwork Giant Clothing'],
@@ -378,14 +379,16 @@ function nextWorkDay(d,n){let x=new Date(d);n=n||1;while(n>0){x=addDays(x,1);if(
 
 /* ── parse the paste ───────────────────────────────────────────────────── */
 function parseRaw(txt){
-  const so=[],po=[],stk=[],cmt=[];let bad=0;
+  const so=[],po=[],stk=[],cmt=[],txts=[];let bad=0;
   txt.replace(/\r/g,'').split('\n').forEach(line=>{
     if(!line.trim())return;
     const c=line.split('\t').map(x=>{x=x.trim();if(x.length>1&&x[0]==='"'&&x[x.length-1]==='"')x=x.slice(1,-1).replace(/""/g,'"');return x.trim()});
     if(c[0]==='RowType')return;
-    if(!/^(SO|CMT|PO|STK)$/.test(c[0])||c.length<20){bad++;return}
+    if(!/^(SO|CMT|TXT|PO|STK)$/.test(c[0])||c.length<20){bad++;return}
     // v2.8: CMT = a comment line typed on the Sage order (text in column E); shown under the lines on the order card
     if(c[0]==='CMT'){if(c[4])cmt.push({key:c[2],co:c[1],doc:c[5],seq:num(c[6]),text:c[4]});return}
+    // v2.13: TXT = a free text line on the Sage order (web "personalisation ... logo" lines, typed embroidery / transfer notes); tied to the product line before it
+    if(c[0]==='TXT'){if(c[4])txts.push({key:c[2],co:c[1],doc:c[5],seq:num(c[6]),text:c[4],q1:num(c[11]),q2:num(c[12]),out:num(c[13])});return}
     const base={key:c[2],co:c[1],code:c[3].toUpperCase(),desc:c[4],doc:c[5],seq:num(c[6]),acct:c[7],acctName:c[8],ref:c[9],
       date:c[10]||'',q1:num(c[11]),q2:num(c[12]),q3:num(c[13]),q4:c[14]===''?null:num(c[14]),fulfil:c[15],link:c[16]||'',b2bN:num(c[17]),
       ic:c[18]==='Y',status:c[27]||'0',added:c[28]||'',user:c[29]||''};
@@ -395,7 +398,7 @@ function parseRaw(txt){
       inStock:num(c[11]),alloc:num(c[12]),free:num(c[13]),onPO:num(c[14]),fulfil:c[15],b2bHist:num(c[17]),
       mfr:c[19],stockHeld:c[20]==='Yes',web:c[21]==='Yes',grp:c[22],bom:c[23],lead:c[24]===''?null:num(c[24]),leadUnit:c[25],moq:num(c[26]),missing:c[4]==='CODE NOT IN STOCK FILE'});
   });
-  return {so,po,stk,cmt,bad};
+  return {so,po,stk,cmt,txt:txts,bad};
 }
 
 /* ── the other apps' published data ────────────────────────────────────── */
@@ -498,6 +501,42 @@ function isClockworkPO(l){return CLOCKWORK_ACCTS.includes(l.acct)||/clockwork/i.
 
 // v2.2: an embroidery charge line (Sage stock items "EMBROIDERY LOGO APPLICATION / ORIGINATION / TEXT APPLICATION CHARGE")
 const isEmbCode=c=>/^(LOGO|TEXT)(APPLICATION|ORIGINATION)/.test(c||'');
+// v2.13: does a free text line describe decoration? EMB (logo, text, name, personalisation) or a transfer / print
+const txtKind=t=>/transfer|\bdtf\b|\bprint/i.test(t||'')?'Transfer':/embroid|\bemb\b|logo|personalis|monogram|initial|\bname\b|\btext\b/i.test(t||'')?'EMB':'';
+// v2.13: which garment lines get embroidery or a transfer. Sage puts the instruction AFTER the garment: a free text line
+// (web orders: "personalisation ... logo"), a LOGO/TEXT APPLICATION charge line, or the transfer line itself. A charge or
+// transfer line is matched to the garment line(s) printed just before it by quantity; origination charges are one-off and skipped.
+function tagEmbLines(o){
+  o.lines.forEach(l=>{l.embOn='';l.embTxt=[]});
+  const items=o.lines.map(l=>({t:'ln',seq:l.seq,l})).concat((o.texts||[]).map(x=>({t:'txt',seq:x.seq,x}))).sort((a,b)=>a.seq-b.seq);
+  let last=null,group=[],prevHit=[],pending=[],afterMarker=false;o.embUnmatched=0;
+  const mark=(l,kind,note)=>{if(!l.embOn)l.embOn=kind;else if(!l.embOn.includes(kind))l.embOn=l.embOn==='EMB'?'EMB + Transfer':'EMB + Transfer';if(note&&!l.embTxt.includes(note))l.embTxt.push(note)};
+  const sumQ=ls=>ls.reduce((a,l)=>a+l.q1,0);
+  // a charge / transfer line: first the garment line(s) just before it whose quantities add up to it (newest first);
+  // then the garment(s) it was already matched to (a second logo on the same garments); otherwise it is typed above
+  // the garments it belongs to, so hold it and match the lines that follow
+  const apply=(kind,qty,note)=>{
+    let hit=[];
+    if(afterMarker&&prevHit.length&&sumQ(prevHit)===qty){prevHit.forEach(g=>mark(g,kind,note));return}   // two markers in a row = both on the same garment(s)
+    if(group.length&&group[0].q1===qty)hit=[group[0]];
+    else{let sum=0;for(const g of group){sum+=g.q1;hit.push(g);if(sum>=qty)break}if(sum!==qty)hit=[]}
+    if(hit.length){hit.forEach(g=>mark(g,kind,note));prevHit=hit;group=group.filter(g=>!hit.includes(g));return}
+    if(!group.length&&prevHit.length&&sumQ(prevHit)===qty){prevHit.forEach(g=>mark(g,kind,note));return}
+    pending.push({kind,qty,note,sum:0,lines:[],fallback:group.slice(0,1)});   // fallback = the nearest garment above it
+  };
+  const settle=p=>{const ls=p.lines.length&&p.sum===p.qty?p.lines:p.fallback.length?p.fallback:last?[last]:[];if(!ls.length){o.embUnmatched++;return}ls.forEach(g=>mark(g,p.kind,p.note));if(p.sum===p.qty){prevHit=ls;group=group.filter(g=>!ls.includes(g))}};
+  items.forEach(it=>{
+    if(it.t==='txt'){const k=txtKind(it.x.text);if(k&&last)mark(last,k,it.x.text);return}
+    const l=it.l;
+    if(l.transfer){apply('Transfer',l.q1,(l.desc||l.code).trim());afterMarker=true;return}
+    if(isEmbCode(l.code)){if(/ORIGINATION/.test(l.code))return;apply('EMB',l.q1,(l.desc||'').replace(/^EMBROIDERY (LOGO|TEXT) (APPLICATION|ORIGINATION) CHARGE[\s-]*/i,'').trim());afterMarker=true;return}
+    if(l.charge)return;
+    afterMarker=false;last=l;group.unshift(l);
+    pending.forEach(p=>{p.lines.push(l);p.sum+=l.q1});
+    pending.filter(p=>p.sum>=p.qty).forEach(settle);pending=pending.filter(p=>p.sum<p.qty);
+  });
+  pending.forEach(settle);
+}
 // v2.2: what counts as "production" on a line – a works order, a special make with no WO yet (also through the Tibard order
 // an OH order is bought from), or a made-in-house code with nothing on order that is not a Clockwork container code
 const prodSrc=(s,ln)=>s.t==='wo'||s.t==='smpend'||(s.t==='short'&&ln.made&&(PP.codes.has(ln.base)||!SP.codes.has(ln.base)))||(s.t==='po'&&!!s.via&&s.via.sources.some(x=>prodSrc(x,s.via)));
@@ -544,6 +583,10 @@ function build(){
   ORDERS.forEach(o=>o.notes=[]);
   (DATA.cmt||[]).forEach(c=>{const o=ORD_IDX.get(c.co+'|'+soNo(c.doc));if(o)o.notes.push(c)});
   ORDERS.forEach(o=>o.notes.sort((a,b)=>a.seq-b.seq));
+  // v2.13: free text lines, then work out which garment lines get embroidery / a transfer
+  ORDERS.forEach(o=>o.texts=[]);
+  (DATA.txt||[]).forEach(x=>{const o=ORD_IDX.get(x.co+'|'+soNo(x.doc));if(o)o.texts.push(x)});
+  ORDERS.forEach(o=>{o.texts.sort((a,b)=>a.seq-b.seq);tagEmbLines(o)});
 
   // ── pools: who gets the stock, works orders, containers and POs ──
   const poolKey=ln=>(ln.made&&SET.share?'ALL':ln.co)+'|'+ln.base;
@@ -701,7 +744,9 @@ function build(){
     o.embLines=o.lines.filter(l=>l.out>0&&isEmbCode(l.code));
     o.embWO=waiting.some(l=>l.sources.some(s=>s.t==='wo'&&s.embOnly));
     o.trLines=o.lines.filter(l=>l.out>0&&l.transfer);   // v2.3: transfers to apply
-    o.emb=o.embLines.length>0||o.trLines.length>0||o.embWO||/^\s*(EMB|DTF|PRINT)\b/i.test(o.ref||'');
+    o.embGarm=o.lines.filter(l=>l.out>0&&l.embOn);        // v2.13: garment lines still to go that get a logo / transfer
+    o.embTxtOnly=o.embGarm.some(l=>/EMB/.test(l.embOn))&&!o.embLines.length;   // EMB known only from a free text line (no charge line on the order)
+    o.emb=o.embLines.length>0||o.trLines.length>0||o.embGarm.length>0||o.embWO||/^\s*(EMB|DTF|PRINT)\b/i.test(o.ref||'');
     o.in10=!!o.promD&&o.promD<=horizon;   // due within the next working days, anything late included
     if(!live.length)o.status='done';
     else if(o.hold&&!SET.holdSO)o.status='hold';
@@ -716,7 +761,7 @@ function build(){
     const onShelf=s=>s.t==='alloc'||s.t==='stock'||s.t==='ohstock';
     o.shipToday=o.status!=='hold'&&live.length>0&&live.every(l=>l.sources.length&&l.sources.every(onShelf));
     o.shipBookIn=o.status!=='hold'&&live.length>0&&!o.shipToday&&live.every(l=>l.sources.length&&l.sources.every(s=>onShelf(s)||s.t==='pipe'));
-    o.hay=(o.doc+' '+o.acctName+' '+o.acct+' '+o.ref+' '+o.user+' '+o.lines.map(l=>l.code+' '+l.desc).join(' ')+(o.noPart?" can't part ship":'')).toLowerCase();
+    o.hay=(o.doc+' '+o.acctName+' '+o.acct+' '+o.ref+' '+o.user+' '+o.lines.map(l=>l.code+' '+l.desc).join(' ')+' '+(o.texts||[]).map(x=>x.text).join(' ')+(o.noPart?" can't part ship":'')).toLowerCase();
   });
   pruneEmbX();
   computeJumps();
@@ -814,20 +859,43 @@ function lineWhere(ln){
 function expCell(ln){if(ln.out<=0||ln.charge||ln.freetext)return '–';if(ln.unknown)return '<span class="sm">unknown</span>';const d=ln.expected;const p=ln.promD;return `<span${p&&d>p?' style="color:var(--red);font-weight:700"':''}>${fd(d)}</span>`}
 function orderExp(o){if(o.unknown)return '<span class="sm">unknown</span>';if(!o.waiting.length)return '<span class="sm">now</span>';const p=o.promD;return `<span${p&&o.expected>p?' style="color:var(--red);font-weight:700"':''}>${fd(o.expected)}</span>`}
 // v2.11: one line per item, like the production list – "1 × CODE · WO-1390 due 20 Nov – overdue"
+// one source of a line as "what it is waiting on" text (v2.13: shared by the Waiting on and Garments columns)
+function srcKey(s,l){
+  let k='',bad=false;
+  if(s.t==='wo'){k=s.ref+(s.embOnly?' (EMB)':'')+' due '+(s.due?fd(pd(s.due)):'?')+(s.overdue?' – overdue':'');bad=!!s.overdue||!s.due}
+  else if(s.t==='cont'){const d=pd(s.date);k=s.ref+' lands '+fd(d)+(d&&d<today()?' – overdue':'');bad=!d||d<today()}
+  else if(s.t==='po'){k=(s.po.src.ic?'via Tibard PO ':'PO ')+soNo(s.po.src.doc)+(s.po.src.ic?'':' '+(s.po.src.acctName||'')+' '+(s.po.date?fd(s.po.date)+(s.overdue?' – overdue':''):'no date'));bad=!!s.overdue||(!s.po.src.ic&&!s.po.date)}
+  else if(s.t==='short'){k=l.made?'not on a works order':'no PO';bad=true}
+  else if(s.t==='smpend'){k='special make, no WO';bad=true}
+  return {k,bad};
+}
 function waitSummary(o){
   const parts=[];const seen=new Map();
   o.waiting.forEach(l=>l.sources.forEach(s=>{
-    let k='',bad=false;
-    if(s.t==='wo'){k=s.ref+(s.embOnly?' (EMB)':'')+' due '+(s.due?fd(pd(s.due)):'?')+(s.overdue?' – overdue':'');bad=!!s.overdue||!s.due}
-    else if(s.t==='cont'){const d=pd(s.date);k=s.ref+' lands '+fd(d)+(d&&d<today()?' – overdue':'');bad=!d||d<today()}
-    else if(s.t==='po'){k=(s.po.src.ic?'via Tibard PO ':'PO ')+soNo(s.po.src.doc)+(s.po.src.ic?'':' '+(s.po.src.acctName||'')+' '+(s.po.date?fd(s.po.date)+(s.overdue?' – overdue':''):'no date'));bad=!!s.overdue||(!s.po.src.ic&&!s.po.date)}
-    else if(s.t==='short'){k=l.made?'not on a works order':'no PO';bad=true}
-    else if(s.t==='smpend'){k='special make, no WO';bad=true}
+    const {k,bad}=srcKey(s,l);
     if(!k)return;
     const id=l.base+'|'+k;
     if(seen.has(id))seen.get(id).qty+=s.qty||0;else{const p={code:l.base,qty:s.qty||0,k,bad};seen.set(id,p);parts.push(p)}
   }));
   return parts.slice(0,6).map(p=>`<div><b>${fmt(p.qty)}</b> × <span class="code">${esc(p.code)}</span> · <span${p.bad?' style="color:var(--red)"':''}>${esc(p.k)}</span></div>`).join('')+(parts.length>6?'<div class="sm">+'+(parts.length-6)+' more – open the order</div>':'');
+}
+// v2.13: the Garments column of the embroidery list – the lines that get a logo / transfer first, with what they are
+// waiting on, then the lines that are only short of stock marked "No EMB" so nobody reads them as needing embroidery
+const embPills=k=>(k||'').split(' + ').filter(Boolean).map(x=>x==='EMB'?' <span class="pill p-purple" title="This line gets embroidery">EMB</span>':' <span class="pill p-blue" title="This line gets a transfer">Transfer</span>').join('');
+function embGarments(o,plain){
+  if(!o.embGarm.length){
+    const note=!(DATA.txt||[]).length?'which garments get the logo is not shown – paste today\'s data with the latest query':o.embUnmatched?'logo line not matched to a garment – open the order':'';
+    if(plain)return (o.waiting.length?waitSummary(o).replace(/<\/div>\s*<div[^>]*>/g,' | ').replace(/<[^>]+>/g,'').replace(/&amp;/g,'&').replace(/&#39;/g,"'").replace(/&quot;/g,'"').replace(/&lt;/g,'<').replace(/&gt;/g,'>'):'in stock')+(note?' ('+note+')':'');
+    return (o.waiting.length?waitSummary(o):'<span class="pill p-green">In stock</span>')+(note?'<div class="sm">'+esc(note)+'</div>':'');
+  }
+  const rows=[];
+  const where=l=>{const w=l.sources.filter(s=>s.t!=='alloc'&&s.t!=='stock'&&s.t!=='ohstock'&&s.t!=='pipe').map(s=>srcKey(s,l)).filter(x=>x.k);
+    if(!w.length)return {k:l.sources.some(s=>s.t==='pipe')?'made – awaiting book-in':'in stock',bad:false,ok:true};
+    return {k:[...new Set(w.map(x=>x.k))].join(', '),bad:w.some(x=>x.bad),ok:false}};
+  o.embGarm.forEach(l=>rows.push(Object.assign({pill:l.embOn,qty:l.out,code:l.base},where(l))));
+  o.waiting.filter(l=>!l.embOn&&!l.charge&&!l.transfer).forEach(l=>rows.push(Object.assign({pill:'No EMB',qty:l.out,code:l.base},where(l))));
+  if(plain)return rows.map(r=>r.pill+': '+fmt(r.qty)+' x '+r.code+' – '+r.k).join(' | ');
+  return rows.slice(0,6).map(r=>`<div>${r.pill==='No EMB'?'<span class="pill p-grey" title="This line gets no logo or transfer – it is only waiting on stock">No EMB</span>':embPills(r.pill).trim()} <b>${fmt(r.qty)}</b> × <span class="code">${esc(r.code)}</span> · <span${r.bad?' style="color:var(--red)"':r.ok?' style="color:#065f46"':''}>${esc(r.k)}</span></div>`).join('')+(rows.length>6?'<div class="sm">+'+(rows.length-6)+' more – open the order</div>':'');
 }
 
 /* ── render ────────────────────────────────────────────────────────────── */
@@ -932,7 +1000,7 @@ function orderCard(o){
     <div class="tw"><table><thead><tr><th>#</th><th>Code</th><th class="num">Ordered</th><th class="num">Sent</th><th class="num">To go</th><th>Where it is</th><th>Expected</th><th>Status</th></tr></thead><tbody>`;
   o.lines.forEach(ln=>{
     const open=UI.openLine[ln.key];
-    h+=`<tr class="${rowCls(o)}" onclick="toggleLine('${esc(ln.key)}')"><td class="num">${ln.seq||''}</td><td><span class="code">${esc(ln.code)}</span>${ln.special?' <span class="pill p-gold" title="Made in house, not a stock-held code">SM</span>':''}<div class="desc">${esc(ln.desc)}</div></td><td class="num">${fmt(ln.q1)}</td><td class="num">${fmt(ln.q2)}</td><td class="num"><b>${fmt(ln.out)}</b></td><td>${lineWhere(ln)}</td><td>${expCell(ln)}</td><td>${pill(ln.status)}</td></tr>`;
+    h+=`<tr class="${rowCls(o)}" onclick="toggleLine('${esc(ln.key)}')"><td class="num">${ln.seq||''}</td><td><span class="code">${esc(ln.code)}</span>${ln.special?' <span class="pill p-gold" title="Made in house, not a stock-held code">SM</span>':''}${embPills(ln.embOn)}<div class="desc">${esc(ln.desc)}</div>${ln.embTxt&&ln.embTxt.length?ln.embTxt.map(t=>`<div class="embtxt">${esc(t)}</div>`).join(''):''}</td><td class="num">${fmt(ln.q1)}</td><td class="num">${fmt(ln.q2)}</td><td class="num"><b>${fmt(ln.out)}</b></td><td>${lineWhere(ln)}</td><td>${expCell(ln)}</td><td>${pill(ln.status)}</td></tr>`;
     if(open)h+=`<tr class="det"><td colspan="8">${lineDetail(ln)}</td></tr>`;
   });
   h+=`</tbody></table></div>`;
@@ -995,19 +1063,21 @@ function prodSummary(o,plain){
 }
 function embSummary(o,plain){
   let parts=o.embLines.map(l=>(l.desc||l.code).replace(/^EMBROIDERY (LOGO|TEXT) (APPLICATION|ORIGINATION) CHARGE[\s-]*/i,'').trim()||(/^TEXT/.test(l.code)?'Text':/ORIGINATION/.test(l.code)?'Logo origination':'Logo'));
+  // v2.13: embroidery known only from free text lines (web "personalisation ... logo", typed notes) – one row per distinct text
+  if(o.embTxtOnly)o.embGarm.filter(l=>/EMB/.test(l.embOn)).forEach(l=>l.embTxt.forEach(t=>{if(txtKind(t)==='EMB')parts.push(t.length>60?t.slice(0,57)+'…':t)}));
   parts=[...new Set(parts)].map(x=>({k:'EMB',x}));
   const tr=new Map();o.trLines.forEach(l=>{const d=(l.desc||l.code).trim();tr.set(d,(tr.get(d)||0)+l.out)});   // v2.3: same transfer on several lines = one row
   tr.forEach((q,d)=>parts.push({k:'Transfer',x:fmt(q)+' × '+d}));
   if(!parts.length)parts.push({k:'',x:o.embWO?'Embroidery-only works order':'EMB / print order reference – no embroidery or transfer line on the order'});
-  if(plain)return parts.map(p=>(p.k==='Transfer'?'Transfer: ':'')+p.x).join(' | ');
-  return parts.slice(0,5).map(p=>`<div>${p.k==='Transfer'?'<span class="pill p-blue">Transfer</span> ':''}${esc(p.x)}</div>`).join('')+(parts.length>5?'<div class="sm">+'+(parts.length-5)+' more – open the order</div>':'');
+  if(plain)return parts.map(p=>(p.k?p.k+': ':'')+p.x).join(' | ');
+  return parts.slice(0,5).map(p=>`<div>${p.k==='Transfer'?'<span class="pill p-blue">Transfer</span> ':p.k==='EMB'?'<span class="pill p-purple">EMB</span> ':''}${esc(p.x)}</div>`).join('')+(parts.length>5?'<div class="sm">+'+(parts.length-5)+' more – open the order</div>':'');
 }
 function meetTable(list,tab){
   if(!list.length)return '<div class="empty">Nothing here.</div>';
   const isP=tab==='prod10';
   let h=`<div class="tw"><table><thead><tr>${th(tab,'status','Status')}${th(tab,'so','Order')}${th(tab,'cust','Customer')}${th(tab,'prom','Promised')}${th(tab,'days','Days')}${th(tab,'out','To go','num')}${isP?'<th>In production</th>':'<th>Embroidery / transfer</th><th>Garments</th>'}${th(tab,'exp','Expected')}</tr></thead><tbody>`;
   list.forEach(o=>{
-    h+=`<tr class="${rowCls(o)}" onclick="openOrder('${esc(o.key)}')"><td>${pill(o.status)}${npsPill(o)}${o.special?' <span class="pill p-gold" title="Special make">SM</span>':''}</td><td>${coTag(o.co)} <span class="code">${esc(o.doc)}</span></td><td>${esc(custName(o))}<div class="desc">${custName(o)===o.ref.trim().replace(/^(EMB|DTF):\s*/i,'')?esc(o.acctName):esc(o.ref)}</div></td><td>${fd(o.promD)}</td><td>${daysCell(o)}</td><td class="num">${fmt(o.outQty)}<div class="sm">${o.outLines} line${o.outLines===1?'':'s'}</div></td>${isP?`<td class="sm summary-list" style="color:var(--txt)">${prodSummary(o)}</td>`:`<td class="sm summary-list" style="color:var(--txt)">${embSummary(o)}</td><td class="sm summary-list" style="color:var(--txt)">${o.waiting.length?waitSummary(o):'<span class="pill p-green">In stock</span>'}</td>`}<td>${isP?orderExp(o):embExpCell(o)}</td></tr>`;
+    h+=`<tr class="${rowCls(o)}" onclick="openOrder('${esc(o.key)}')"><td>${pill(o.status)}${npsPill(o)}${o.special?' <span class="pill p-gold" title="Special make">SM</span>':''}</td><td>${coTag(o.co)} <span class="code">${esc(o.doc)}</span></td><td>${esc(custName(o))}<div class="desc">${custName(o)===o.ref.trim().replace(/^(EMB|DTF):\s*/i,'')?esc(o.acctName):esc(o.ref)}</div></td><td>${fd(o.promD)}</td><td>${daysCell(o)}</td><td class="num">${fmt(o.outQty)}<div class="sm">${o.outLines} line${o.outLines===1?'':'s'}</div></td>${isP?`<td class="sm summary-list" style="color:var(--txt)">${prodSummary(o)}</td>`:`<td class="sm summary-list" style="color:var(--txt)">${embSummary(o)}</td><td class="sm summary-list" style="color:var(--txt)">${embGarments(o)}</td>`}<td>${isP?orderExp(o):embExpCell(o)}</td></tr>`;
   });
   return h+'</tbody></table></div>';
 }
@@ -1016,7 +1086,7 @@ function exportMeetCsv(tab){
   const cell=s=>'"'+String(s==null?'':s).replace(/"/g,'""')+'"';
   const lines=[['Status','Company','SO','Customer','Account','Their ref','Ordered','Promised','Days','Lines to go','Qty to go'].concat(isP?['In production']:['Embroidery / transfer','Garments'],['Expected']).map(cell).join(',')];
   rows.forEach(o=>{
-    const g=o.waiting.length?waitSummary(o).replace(/<\/div>\s*<div[^>]*>/g,' | ').replace(/<[^>]+>/g,'').replace(/&amp;/g,'&').replace(/&#39;/g,"'").replace(/&quot;/g,'"').replace(/&lt;/g,'<').replace(/&gt;/g,'>'):'in stock';
+    const g=embGarments(o,true);
     lines.push([STATUS_PILL[o.status][1],o.co,o.doc,custName(o),o.acct,o.ref,o.added,o.promised,o.days,o.outLines,o.outQty].concat(isP?[prodSummary(o,true)]:[embSummary(o,true),g],[o.expSet?iso(o.expSet):o.unknown?'unknown':iso(o.expected)]).map(cell).join(','));
   });
   const a=document.createElement('a');a.href=URL.createObjectURL(new Blob(['\ufeff'+lines.join('\r\n')],{type:'text/csv'}));a.download=(isP?'production':'embroidery')+'-list-'+iso(today())+'.csv';document.body.appendChild(a);a.click();setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove()},500);
@@ -1045,7 +1115,7 @@ function renderRisk(v){
   if(UI.tile==='prod10'||UI.tile==='emb10'){   // v2.2: one list in date order for the morning meeting
     const isP=UI.tile==='prod10',rows=sortBy(isP?p10:e10,UI.tile,{k:'prom',d:'a'});
     h+=`<div class="sec"><h3>${isP?'Production':'Embroidery & transfers'} – late or due by ${fd(nextWorkDay(today(),AH))} <span class="n">${rows.length}</span><span class="r">${isP?'orders with goods still in production or needing a works order':'orders with embroidery or transfers to do'} · oldest promised date first · <a href="javascript:void(0)" onclick="exportCsv('${UI.tile}')">Export CSV</a> · <a href="javascript:void(0)" onclick="window.print()">Print</a></span></h3><div class="card" style="margin-top:8px">${meetTable(rows,UI.tile)}</div></div>`;
-    h+=`<div class="legend"><span><b>Late</b> = promised date has passed, or the order is due today and its goods are still in production.</span>${isP?'<span><b>In production</b> = the lines waiting on a works order, a special make with no works order yet, or a made-in-house code with nothing on order. Lines waiting only on a Clockwork container or a supplier PO are not counted here.</span>':'<span><b>Embroidery</b> = the order has an embroidery charge line still to go (logo application, text application or logo origination), an EMB: order reference, or a line on an embroidery-only works order. <b>Transfer</b> = a transfer line still to go (Sage product group 53, tax tabs left out) or a DTF: / Print: order reference.</span><span><b>Garments</b> = whether the goods to embroider are in stock now or what they are waiting on.</span>'}<span>Intercompany and on-hold orders are not listed.</span></div>`;
+    h+=`<div class="legend"><span><b>Late</b> = promised date has passed, or the order is due today and its goods are still in production.</span>${isP?'<span><b>In production</b> = the lines waiting on a works order, a special make with no works order yet, or a made-in-house code with nothing on order. Lines waiting only on a Clockwork container or a supplier PO are not counted here.</span>':'<span><b>Embroidery</b> = the order has an embroidery charge line still to go (logo application, text application or logo origination), a free text line describing a logo / personalisation under a garment, an EMB: order reference, or a line on an embroidery-only works order. <b>Transfer</b> = a transfer line still to go (Sage product group 53, tax tabs left out), a free text transfer / print note, or a DTF: / Print: order reference.</span><span><b>Garments</b> = the lines that get the logo or transfer (<span class="pill p-purple">EMB</span> / <span class="pill p-blue">Transfer</span> – the free text, charge or transfer line printed under them in Sage) and whether they are in stock or what they are waiting on; <span class="pill p-grey">No EMB</span> lines are only short of stock.</span>'}<span>Intercompany and on-hold orders are not listed.</span></div>`;
     v.innerHTML=h;return;
   }
   let list=all;
@@ -1110,7 +1180,7 @@ function renderAll(v){
 function renderData(v){
   const t=DATA.ts?fdt(DATA.ts):'–';
   v.innerHTML=`<div class="card"><h2>Where the data comes from</h2><div class="note">
-  <b>Sage</b> (sales orders, purchase orders, stock): pasted ${t}${DATA.pubAt?' · published '+fdt(DATA.pubAt):''} · ${DATA.so.length} SO lines, ${(DATA.cmt||[]).length} comment lines, ${DATA.po.length} PO lines, ${DATA.stk.length} stock rows.<br>
+  <b>Sage</b> (sales orders, purchase orders, stock): pasted ${t}${DATA.pubAt?' · published '+fdt(DATA.pubAt):''} · ${DATA.so.length} SO lines, ${(DATA.cmt||[]).length} comment lines, ${(DATA.txt||[]).length} free text lines, ${DATA.po.length} PO lines, ${DATA.stk.length} stock rows.<br>
   <b>Works orders</b>: production planner, ${PP.ok?'published '+fdt(PP.savedAt)+' · '+PP.wos.length+' live works orders · '+(PP.pipe.reduce((x,c)=>x+c.qty,0)+[...PP.smPipe.values()].reduce((x,a)=>x+a.reduce((y,c)=>y+c.qty,0),0))+' units completed, awaiting Sage book-in (pipeline until 7am next day) · SOP demand pasted '+fdt(PP.sopAt):'<span style="color:var(--red)">not read ('+esc(PP.err)+')</span>'}.<br>
   <b>Can't part ship</b>: ${NPS.ok?NPS.customers.length+' customers from no-part-ship.json'+(NPS.updated?' (updated '+NPS.updated+')':'')+(NPS.local?' – <span style="color:var(--amber)">list saved on this PC, not yet written to GitHub</span>':''):'<span style="color:var(--red)">not read ('+esc(NPS.err)+')</span>'} · ${liveOrders().filter(o=>o.noPart).length} live orders flagged.<br>
   <b>Containers</b>: stock planner, ${SP.ok?'published '+fdt(SP.savedAt)+' · '+SP.cPOs.map(c=>esc(c.ref)+' lands '+fd(pd(c.date))).join(', ')+(SP.nextContDate?' · next order date '+fd(pd(SP.nextContDate)):''):'<span style="color:var(--red)">not read ('+esc(SP.err)+')</span>'}.<br><br>
@@ -1137,7 +1207,7 @@ function loadPaste(){
   m.className='msg ok';m.textContent='';
   if(!kept)alert('Loaded '+r.so.length+' sales order lines, but the paste is too big for this browser to keep between sessions.\n\nPublish for team now; the published copy is what everyone (and this PC, next time) will read.');
 }
-function applyRaw(raw,ts,pubAt){RAW=raw||'';const r=parseRaw(raw);DATA={so:r.so,po:r.po,stk:r.stk,cmt:r.cmt,ts:ts||null,bad:r.bad,pubAt:pubAt||null};build();render()}
+function applyRaw(raw,ts,pubAt){RAW=raw||'';const r=parseRaw(raw);DATA={so:r.so,po:r.po,stk:r.stk,cmt:r.cmt,txt:r.txt,ts:ts||null,bad:r.bad,pubAt:pubAt||null};build();render()}
 function openSettings(){
   document.getElementById('sMade').value=SET.made.join('\n');document.getElementById('sGroups').value=SET.groups.join(', ');
   document.getElementById('sShare').checked=!!SET.share;document.getElementById('sHoldSO').checked=!!SET.holdSO;document.getElementById('sSoon').value=SET.soon;
@@ -1299,7 +1369,7 @@ function publishTeam(){
   const raw=RAW||'';
   const nd=Object.keys(DUE).length;
   if(!raw||!DATA.so.length){if(nd){publishDueOnly();return}alert('Paste today\'s data first'+(embXPending()?' (the expected dates are published with it)':'')+'.');return}
-  const state={app:'ordertracker',ver:APP_VER,raw,ts:DATA.ts||new Date().toISOString(),settings:SET,embExp:EMBX,so:DATA.so.length,cmt:(DATA.cmt||[]).length,po:DATA.po.length,stk:DATA.stk.length,savedAt:new Date().toISOString()};
+  const state={app:'ordertracker',ver:APP_VER,raw,ts:DATA.ts||new Date().toISOString(),settings:SET,embExp:EMBX,so:DATA.so.length,cmt:(DATA.cmt||[]).length,txt:(DATA.txt||[]).length,po:DATA.po.length,stk:DATA.stk.length,savedAt:new Date().toISOString()};
   const json=JSON.stringify(state),tok=pubToken();
   if(!tok){pubNoToken();return}
   const pb=document.getElementById('pubBtn'),was=pb.innerHTML;

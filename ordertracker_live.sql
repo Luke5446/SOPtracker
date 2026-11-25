@@ -16,7 +16,7 @@
    extra STK rows only add a few entries to its Stock held tab), but the
    buyer's own query stays the one for POtracker.
 
-   ONE PASTE. Copy columns A to AD, all rows, without the header. Four row
+   ONE PASTE. Copy columns A to AD, all rows, without the header. Five row
    types share one column layout and the app splits them on column A:
 
      SO   one row per product line on a live or held sales order
@@ -26,6 +26,14 @@
           columns A, B, C, E, F, G and AB are filled. POtracker and tracker
           versions before 2.8 skip the row type, so the paste still works
           there unchanged.
+     TXT  one row per FREE TEXT line on those same orders (LineTypeID 1) -
+          added 25 Nov 2026 (tracker v2.13). Web orders carry the
+          "personalisation ... logo" lines this way, and typed orders carry
+          the embroidery / transfer instruction under each garment. The
+          tracker ties each one to the product line printed just before it,
+          so the embroidery list can say which garments get the logo.
+          Columns A, B, C, E, F, G, L, M, N and AB are filled. POtracker and
+          tracker versions before 2.13 skip the row type.
      PO   one row per live purchase order line with quantity outstanding
      STK  one row per stock code per company, for every code that appears on
           an SO or PO row - the classification and the stock figures
@@ -45,6 +53,7 @@
                         TIB-STK-<code> ...
      D  ProductCode
      E  Description     SO/PO: line description. CMT: the comment text.
+                        TXT: the free text typed on the line.
                         STK: stock item name, or CODE NOT IN STOCK FILE
      F  DocNo           SO/CMT: sales order no. PO: purchase order no
      G  LineSeq         print sequence on the order
@@ -155,6 +164,11 @@ DECLARE @cmt TABLE (
     Company nvarchar(20) COLLATE DATABASE_DEFAULT, RowKey nvarchar(60) COLLATE DATABASE_DEFAULT,
     Description nvarchar(max) COLLATE DATABASE_DEFAULT, DocNo nvarchar(40) COLLATE DATABASE_DEFAULT,
     LineSeq int, DocStatusID nvarchar(10) COLLATE DATABASE_DEFAULT);
+DECLARE @txt TABLE (
+    Company nvarchar(20) COLLATE DATABASE_DEFAULT, RowKey nvarchar(60) COLLATE DATABASE_DEFAULT,
+    Description nvarchar(max) COLLATE DATABASE_DEFAULT, DocNo nvarchar(40) COLLATE DATABASE_DEFAULT,
+    LineSeq int, Qty1 decimal(18,2), Qty2 decimal(18,2), Qty3 decimal(18,2),
+    DocStatusID nvarchar(10) COLLATE DATABASE_DEFAULT);
 DECLARE @codes0 TABLE (Company nvarchar(20) COLLATE DATABASE_DEFAULT, ProductCode nvarchar(60) COLLATE DATABASE_DEFAULT,
                        PRIMARY KEY (Company, ProductCode));
 DECLARE @codes  TABLE (Company nvarchar(20) COLLATE DATABASE_DEFAULT, ProductCode nvarchar(60) COLLATE DATABASE_DEFAULT,
@@ -320,6 +334,52 @@ WHERE
         sor.DocumentTypeID   = 0
     AND sor.DocumentStatusID IN (0,1)
     AND sorl.LineTypeID      = 3
+    AND LTRIM(RTRIM(ISNULL(sorl.ItemDescription,''))) <> ''
+OPTION (RECOMPILE);
+
+/* ------------------------------------------------------------------------
+   2c. TXT rows: the free text item lines (LineTypeID 1) on the same orders,
+   both companies. A web order puts "personalisation ... logo" on a free text
+   line straight after the garment; a typed order puts the embroidery or
+   transfer instruction there. Quantities as on the line.
+   ------------------------------------------------------------------------ */
+INSERT INTO @txt (Company, RowKey, Description, DocNo, LineSeq, Qty1, Qty2, Qty3, DocStatusID)
+SELECT
+    'TIBARD',
+    'TIB-TXT-' + CAST(sorl.SOPOrderReturnLineID AS varchar(20)),
+    LTRIM(RTRIM(REPLACE(REPLACE(REPLACE(ISNULL(sorl.ItemDescription,''), CHAR(9),' '), CHAR(13),' '), CHAR(10),' '))),
+    sor.DocumentNo,
+    sorl.PrintSequenceNumber,
+    CAST(ISNULL(sorl.LineQuantity,0) AS decimal(18,2)),
+    CAST(ISNULL(sorl.DespatchReceiptQuantity,0) AS decimal(18,2)),
+    CAST(ISNULL(sorl.LineQuantity,0) - ISNULL(sorl.DespatchReceiptQuantity,0) AS decimal(18,2)),
+    CAST(sor.DocumentStatusID AS varchar(10))
+FROM        S200_LIVE.dbo.SOPOrderReturn      sor
+INNER JOIN  S200_LIVE.dbo.SOPOrderReturnLine  sorl ON sorl.SOPOrderReturnID = sor.SOPOrderReturnID
+WHERE
+        sor.DocumentTypeID   = 0
+    AND sor.DocumentStatusID IN (0,1)
+    AND sorl.LineTypeID      = 1                  -- free text lines only
+    AND LTRIM(RTRIM(ISNULL(sorl.ItemDescription,''))) <> ''
+
+UNION ALL
+
+SELECT
+    'OLIVER HARVEY',
+    'OH-TXT-' + CAST(sorl.SOPOrderReturnLineID AS varchar(20)),
+    LTRIM(RTRIM(REPLACE(REPLACE(REPLACE(ISNULL(sorl.ItemDescription,''), CHAR(9),' '), CHAR(13),' '), CHAR(10),' '))),
+    sor.DocumentNo,
+    sorl.PrintSequenceNumber,
+    CAST(ISNULL(sorl.LineQuantity,0) AS decimal(18,2)),
+    CAST(ISNULL(sorl.DespatchReceiptQuantity,0) AS decimal(18,2)),
+    CAST(ISNULL(sorl.LineQuantity,0) - ISNULL(sorl.DespatchReceiptQuantity,0) AS decimal(18,2)),
+    CAST(sor.DocumentStatusID AS varchar(10))
+FROM        OliverHarveyLive.dbo.SOPOrderReturn      sor
+INNER JOIN  OliverHarveyLive.dbo.SOPOrderReturnLine  sorl ON sorl.SOPOrderReturnID = sor.SOPOrderReturnID
+WHERE
+        sor.DocumentTypeID   = 0
+    AND sor.DocumentStatusID IN (0,1)
+    AND sorl.LineTypeID      = 1
     AND LTRIM(RTRIM(ISNULL(sorl.ItemDescription,''))) <> ''
 OPTION (RECOMPILE);
 
@@ -571,7 +631,7 @@ WHERE c.Company = 'OLIVER HARVEY'
 OPTION (RECOMPILE);
 
 /* ------------------------------------------------------------------------
-   7. One shape for all four row types - THE RESULT. Columns a row type does
+   7. One shape for all five row types - THE RESULT. Columns a row type does
    not use are blank (text) or NULL (numbers); both paste as an empty cell.
    ------------------------------------------------------------------------ */
 SELECT  RowType, Company, RowKey, ProductCode, Description, DocNo, LineSeq,
@@ -595,6 +655,13 @@ FROM (
            '', '', '', '', '', '', '', CAST(NULL AS decimal(18,2)), DocStatusID, '' AS OrderDate, '' AS EnteredBy
     FROM   @cmt
     UNION ALL
+    SELECT 'TXT', Company, RowKey, '' AS ProductCode, Description, DocNo, LineSeq,
+           '' AS AccountNo, '' AS AccountName, '' AS Reference, '' AS DateISO,
+           Qty1, Qty2, Qty3, CAST(NULL AS decimal(18,2)),
+           '' AS FulfilMethodID, '' AS LinkID, '' AS B2BCount, '' AS Intercompany,
+           '', '', '', '', '', '', '', CAST(NULL AS decimal(18,2)), DocStatusID, '' AS OrderDate, '' AS EnteredBy
+    FROM   @txt
+    UNION ALL
     SELECT 'PO', Company, RowKey, ProductCode, Description, DocNo, LineSeq,
            AccountNo, AccountName, Reference, DateISO, Qty1, Qty2, Qty3, Qty4,
            FulfilMethodID, LinkID, B2BCount, Intercompany,
@@ -608,6 +675,6 @@ FROM (
            BOMItemTypeID, LeadTime, LeadTimeUnitID, MOQ, '' AS DocStatusID, '' AS OrderDate, '' AS EnteredBy
     FROM   @stk
 ) allrows
-ORDER BY CASE RowType WHEN 'SO' THEN 1 WHEN 'CMT' THEN 2 WHEN 'PO' THEN 3 ELSE 4 END,
+ORDER BY CASE RowType WHEN 'SO' THEN 1 WHEN 'CMT' THEN 2 WHEN 'TXT' THEN 2 WHEN 'PO' THEN 3 ELSE 4 END,
          Company, ProductCode, DocNo, LineSeq
 OPTION (RECOMPILE);
