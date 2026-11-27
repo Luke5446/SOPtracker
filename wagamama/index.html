@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Wagamama code switch</title>
+<!-- Changelog: 2026-11-27 v2.7 - Can ship in full: click an order to drill down into its open lines (code, description, ordered / despatched / to go, status). -->
 <!-- Changelog: 2026-11-25 v2.6 - reversed transfers survive a new paste/publish (they were deleted with the day's cleared decisions, so the next publish dropped them). -->
 <!-- Changelog: 2026-11-25 v2.5 - reversed transfers: published history entries marked cleared/reversed clear on every PC and stay in the publish; seven 009XS689 transfers of 23 Nov reversed in data.json. -->
 <!-- Changelog: 2026-11-25 v2.4 - free-issue rule (styles 008/009, Settings): size swaps only from free-issue stock; otherwise 'Switch + transfer' moves the Sage line to the chargeable code in the ordered size (d.to) and the add-stock/pick list/switch list follow it. -->
@@ -91,6 +92,8 @@ td.num,th.num{text-align:right;font-variant-numeric:tabular-nums;white-space:now
 .acts .btn{margin:1px 2px}
 .note{font-size:11.5px;color:var(--mut);background:#f7f9fc;border-left:3px solid var(--gold);padding:8px 10px;border-radius:0 6px 6px 0;margin:10px 0;line-height:1.5}
 .sortable{cursor:pointer;user-select:none} .sortable:hover{color:var(--navy)}
+.shiprow{cursor:pointer} .shiprow:hover td{background:#f7f5ee} .shiprow .caret{color:var(--mut);font-size:11px} .shiprow.open td{background:#f3efe2}
+.shipdetail>td{background:#fbfaf6;padding:6px 10px 10px 28px} table.sub{width:auto;min-width:60%;font-size:12.5px} table.sub th{font-size:10.5px}
 .osum{font-size:12px;color:var(--mut)} .badge.blue{background:#e0ebff;color:#1d4ed8}
 .amber-note{background:#fff7e6;border-left-color:#d97706;color:#7c4a03}
 .grid{border-collapse:separate;border-spacing:0}
@@ -252,7 +255,7 @@ input.find{border:1px solid var(--line);border-radius:6px;padding:8px 11px;font-
 
 <script>
 /* ============================ constants ============================ */
-const VER='2.6';
+const VER='2.7';
 const IS_EDITOR=/[?&]edit\b/.test(location.search);
 const SOP_DATA='../data.json';                 // Order tracker feed, same GitHub Pages origin
 const OWN_DATA='data.json';                    // optional published paste from wagamama_live.sql
@@ -369,21 +372,25 @@ function build(){
   // Columns: q1 ordered, q2 despatched, q3 still to go, q4 allocated. Only lines with something to go count; a fully despatched order drops out.
   // Sage allocation is only set at despatch, so it is ignored: physical stock is shared across live lines oldest promised first (same rule as the T-shirts).
   const ORD={};(DATA.all||[]).filter(r=>r.q3>0).sort((a,b)=>(a.date||'9')<(b.date||'9')?-1:1).forEach(r=>{
-    const o=ORD[r.doc]||(ORD[r.doc]={doc:r.doc,cust:r.cust,ref:r.ref,date:r.date,ordered:r.ordered,hold:r.status==='1',lines:0,ready:0,short:0,prod:0,shortCodes:[],codes:[]});o.lines++;o.codes.push(r.code);
+    const o=ORD[r.doc]||(ORD[r.doc]={doc:r.doc,cust:r.cust,ref:r.ref,date:r.date,ordered:r.ordered,hold:r.status==='1',lines:0,ready:0,short:0,prod:0,shortCodes:[],codes:[],items:[]});o.lines++;o.codes.push(r.code);
     let ready=true,prod=false;
     if(r.code.startsWith('WAGTS')){const l=byKey[r.key];ready=!!l&&l.need<=l.own}
     else if(!/CHARGE|CARRIAGE|POSTAGE|FREET|DELIVERY/i.test(r.code)){const st=(DATA.stkAll||{})[r.code];if(st&&st.grp!=='54'){const need=r.q3;const t=Math.min(need,Math.max(0,free[r.code]||0));free[r.code]-=t;if(t<need){ready=false;prod=/tibard|oliver/i.test(st.manu)}}}
     if(ready)o.ready++;else{o.short++;o.shortCodes.push(r.code);if(prod)o.prod++}
+    o.items.push({seq:r.seq,code:r.code,desc:r.desc,q1:r.q1,q2:r.q2,q3:r.q3,ready,prod});
   });
   M.orders=ORD;M.shipFull=Object.values(ORD).filter(o=>o.lines&&o.ready===o.lines).sort((a,b)=>(a.date||'9')<(b.date||'9')?-1:1);
 }
 let SHIP={by:'date',asc:true};
-function shipSort(by){if(SHIP.by===by)SHIP.asc=!SHIP.asc;else SHIP={by,asc:true};renderShip()}
+function shipOpen(doc){SHIP.open=SHIP.open===doc?'':doc;renderShip()}
+// Drill-down: every open line on the order (lines with nothing to go are not listed).
+function orderLines(o){return '<table class="sub"><thead><tr><th>Line</th><th>Code</th><th>Description</th><th class="num">Ordered</th><th class="num">Despatched</th><th class="num">To go</th><th>Status</th></tr></thead><tbody>'+o.items.slice().sort((a,b)=>a.seq-b.seq).map(i=>'<tr><td>'+i.seq+'</td><td><span class="code">'+esc(i.code)+'</span></td><td>'+esc(i.desc)+'</td><td class="num">'+i.q1+'</td><td class="num">'+i.q2+'</td><td class="num"><b>'+i.q3+'</b></td><td>'+(i.ready?'<span class="badge green">in stock</span>':i.prod?'<span class="badge amber">in production</span>':'<span class="badge red">short</span>')+'</td></tr>').join('')+'</tbody></table>'}
+function shipSort(by){if(SHIP.by===by)SHIP.asc=!SHIP.asc;else SHIP={by,asc:true,open:SHIP.open};renderShip()}
 function renderShip(){const q=(document.getElementById('shipFind').value||'').trim().toLowerCase();
   document.getElementById('shipSortDate').textContent=SHIP.by==='date'?(SHIP.asc?'\u25B2':'\u25BC'):'';document.getElementById('shipSortOrdered').textContent=SHIP.by==='ordered'?(SHIP.asc?'\u25B2':'\u25BC'):'';
   const rows=M.shipFull.filter(o=>!q||soNo(o.doc).includes(q)||(o.codes||[]).some(c=>c.toLowerCase().includes(q)))
     .sort((a,b)=>{const x=a[SHIP.by]||'9',y=b[SHIP.by]||'9';return (x<y?-1:x>y?1:0)*(SHIP.asc?1:-1)});
-  document.querySelector('#shipTable tbody').innerHTML=rows.length?rows.map(o=>'<tr><td><b>'+esc(soNo(o.doc))+'</b>'+(o.hold?' <span class="badge amber">On hold</span>':'')+'</td><td>'+esc(o.cust)+'<div class="desc">'+esc(o.ref)+'</div></td><td class="'+(o.date&&o.date<todayISO()?'late':'')+'">'+ukDate(o.date)+'</td><td>'+ukDate(o.ordered)+'</td><td class="num">'+o.lines+'</td></tr>').join(''):'<tr><td colspan="5" class="empty">'+(M.shipFull.length?'No order matches.':'No order can ship in full on this data.')+'</td></tr>'}
+  document.querySelector('#shipTable tbody').innerHTML=rows.length?rows.map(o=>{const open=SHIP.open===o.doc;return '<tr class="shiprow'+(open?' open':'')+'" onclick="shipOpen(\''+esc(o.doc)+'\')"><td><span class="caret">'+(open?'\u25BE':'\u25B8')+'</span> <b>'+esc(soNo(o.doc))+'</b>'+(o.hold?' <span class="badge amber">On hold</span>':'')+'</td><td>'+esc(o.cust)+'<div class="desc">'+esc(o.ref)+'</div></td><td class="'+(o.date&&o.date<todayISO()?'late':'')+'">'+ukDate(o.date)+'</td><td>'+ukDate(o.ordered)+'</td><td class="num">'+o.lines+'</td></tr>'+(open?'<tr class="shipdetail"><td colspan="5">'+orderLines(o)+'</td></tr>':'')}).join(''):'<tr><td colspan="5" class="empty">'+(M.shipFull.length?'No order matches.':'No order can ship in full on this data.')+'</td></tr>'}
 // Chargeable code in the ordered size for a free-issue line: same style as the stock being used if Sage has it, else an active chargeable code of that size in the family, else the constructed code (not yet in Sage).
 const SIZE_SUFFIX={XXS:'XXS',XS:'XS',S:'SS',M:'MM',L:'LL',XL:'XL',XXL:'XXL','3XL':'3XL'};
 function chargeTarget(l,s,stk,fam){const want='WAGTS'+s.p.style+(SIZE_SUFFIX[l.p.size]||l.p.size)+s.p.col;if(stk[want])return want;
