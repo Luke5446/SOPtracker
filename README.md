@@ -121,6 +121,13 @@ orders, containers) and nothing else.
 
 ## Changelog
 
+- v2.16 (27 Nov 2026) – **BULK codes retired.** Clockwork container stock
+  now sits on the home codes in HOME (the BULK codes were written off into
+  them on 27 Nov 2026). A code the stock planner tracks counts as stock held,
+  so a Clockwork code is never read as a special make once its BULK record
+  goes. The BULK pooling in the page and `ordertracker_live.sql` is left in
+  place and harmless (the BULK rows are empty); it can be dropped once the
+  BULK items are deleted from Sage.
 - v2.15 (25 Nov 2026) – **Full works order quantity on the line.** The WO
   pill now reads "6 of 60 on WO-1857 · due 27 Nov" instead of "6 on WO-1857",
   so sales can see the whole WO without opening the pencil. The same figure

@@ -249,7 +249,7 @@ textarea{width:100%;min-height:150px;font-size:11px;font-family:Consolas,monospa
         <label>Ignore product groups</label>
         <div><input type="text" id="sGroups"><div class="h">Comma separated. 54 is Additional Charges (logo and handling lines) – these never hold an order up.</div></div>
         <label>Share stock across companies</label>
-        <div><label style="font-weight:400;color:var(--txt);display:flex;gap:8px;align-items:center;padding:0"><input type="checkbox" id="sShare" class="chk"> Made-in-house codes draw on Tibard, BULK and OH stock as one pool</label><div class="h">On by default, as the Buffer sheet counts it. Bought-in codes are always per company.</div></div>
+        <div><label style="font-weight:400;color:var(--txt);display:flex;gap:8px;align-items:center;padding:0"><input type="checkbox" id="sShare" class="chk"> Made-in-house codes draw on Tibard and OH stock as one pool</label><div class="h">On by default, as the Buffer sheet counts it. Bought-in codes are always per company.</div></div>
         <label>Held sales orders</label>
         <div><label style="font-weight:400;color:var(--txt);display:flex;gap:8px;align-items:center;padding:0"><input type="checkbox" id="sHoldSO" class="chk"> Count on-hold sales orders as demand</label><div class="h">Off by default: held orders are shown but take no stock from live ones.</div></div>
         <label>Due soon window</label>
@@ -553,8 +553,9 @@ function build(){
   const stkIdx=new Map();DATA.stk.forEach(s=>stkIdx.set(s.co+'|'+s.code,s));
   const stkFor=(co,code)=>stkIdx.get(co+'|'+code)||null;
   const anyStk=code=>stkFor('TIBARD',code)||stkFor('OLIVER HARVEY',code)||stkFor('TIBARD','BULK'+code)||stkFor('OLIVER HARVEY','BULK'+code);
-  // stock held in either company (Sage analysis code 3, OH website items, or a BULK record) – the planner's special-makes rule
-  const heldAny=base=>{const a=stkFor('TIBARD',base),b=stkFor('OLIVER HARVEY',base);return !!((a&&a.stockHeld)||(b&&(b.stockHeld||b.web))||stkFor('TIBARD','BULK'+base)||stkFor('OLIVER HARVEY','BULK'+base))};
+  // stock held in either company (Sage analysis code 3, OH website items, a BULK record, or a code the stock planner tracks) – the planner's special-makes rule.
+  // v2.16: the BULK codes were retired on 27 Nov 2026 (stock written off into the home codes), so the stock planner's code list stands behind the BULK record test
+  const heldAny=base=>{const a=stkFor('TIBARD',base),b=stkFor('OLIVER HARVEY',base);return !!((a&&a.stockHeld)||(b&&(b.stockHeld||b.web))||SP.codes.has(base)||stkFor('TIBARD','BULK'+base)||stkFor('OLIVER HARVEY','BULK'+base))};
   // made-in-house test per base code
   const madeCache=new Map();
   const isMade=base=>{
